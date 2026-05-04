@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2 } from 'lucide-react'
-import { format } from 'date-fns'
+import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, Mail } from 'lucide-react'
+import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import html2canvas from 'html2canvas'
+import { QRCodeSVG } from 'qrcode.react'
 
 const RECORD_TYPES = {
   check_in: { label: 'Entrada Principal', icon: LogIn, color: 'bg-emerald-500' },
-  lunch_out: { label: 'Saída Almoço', icon: Coffee, color: 'bg-orange-500' },
-  lunch_in: { label: 'Retorno Almoço', icon: Coffee, color: 'bg-blue-500' },
+  lunch_out: { label: 'Saída Refeição', icon: Coffee, color: 'bg-orange-500' },
+  lunch_in: { label: 'Retorno Refeição', icon: Coffee, color: 'bg-blue-500' },
   check_out: { label: 'Saída Definitiva', icon: LogOut, color: 'bg-red-500' },
   other_out: { label: 'Saída Extra', icon: Clock, color: 'bg-purple-500', needsReason: true },
   other_in: { label: 'Retorno Extra', icon: Clock, color: 'bg-indigo-500' },
@@ -33,11 +35,23 @@ export function PinEntry() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [settings, setSettings] = useState(null)
   const [redirectTimer, setRedirectTimer] = useState(null)
+  const [historyRecords, setHistoryRecords] = useState([])
+  const [selectedTickets, setSelectedTickets] = useState(null)
+  const [showQR, setShowQR] = useState(false)
+  const [extraCategory, setExtraCategory] = useState(null)
+  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [isDemo, setIsDemo] = useState(false)
+  const [simulateTime, setSimulateTime] = useState(false)
+  const [customTime, setCustomTime] = useState(format(new Date(), 'HH:mm'))
+  const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const ticketRef = useRef(null)
 
   useEffect(() => {
     db.settings.get('config').then(setSettings)
     db.employees.get(Number(employeeId)).then(emp => {
       setEmployee(emp)
+      if (emp?.cpf === '000.000.000-00') setIsDemo(true)
       if (sessionStorage.getItem('biometricVerified') === String(employeeId)) {
         sessionStorage.removeItem('biometricVerified')
         setStep('select')
@@ -145,6 +159,121 @@ export function PinEntry() {
     setTodayRecords(records.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)))
   }
 
+  const loadHistoryRecords = async () => {
+    const records = await db.records
+      .where('employeeId')
+      .equals(Number(employeeId))
+      .reverse()
+      .limit(30)
+      .toArray()
+    setHistoryRecords(records)
+  }
+
+  const handleGenerateExtract = async () => {
+    const [startYear, startMonth, startDay] = startDate.split('-').map(Number)
+    const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0)
+    
+    const [endYear, endMonth, endDay] = endDate.split('-').map(Number)
+    const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999)
+    
+    const records = await db.records
+      .where('employeeId')
+      .equals(Number(employeeId))
+      .filter(r => {
+        const d = new Date(r.timestamp)
+        return d >= start && d <= end
+      })
+      .toArray()
+      
+    if (records.length === 0) {
+      alert('Nenhum registro encontrado neste período.')
+      return
+    }
+    
+    setSelectedTickets(records.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)))
+    setShowQR(false)
+    setStep('ticket')
+  }
+
+  const calculateTotalHours = (records) => {
+    if (!records || records.length < 2) return '00:00'
+    let totalMs = 0
+    let start = null
+    
+    const sorted = [...records].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    
+    sorted.forEach(r => {
+      const isEntry = ['check_in', 'lunch_in', 'other_in'].includes(r.type)
+      const isExit = ['check_out', 'lunch_out', 'other_out'].includes(r.type)
+      
+      if (isEntry) {
+        if (!start) start = new Date(r.timestamp)
+      } else if (isExit && start) {
+        const isWorkingAbsence = r.type === 'other_out' && (r.category === 'servico' || (r.category === 'medico' && r.status !== 'rejected'))
+        if (!isWorkingAbsence) {
+          totalMs += new Date(r.timestamp) - start
+          start = null
+        }
+      }
+    })
+    
+    const hours = Math.floor(totalMs / 3600000)
+    const minutes = Math.floor((totalMs % 3600000) / 60000)
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}h`
+  }
+
+  const downloadTicketPNG = async () => {
+    if (ticketRef.current) {
+      try {
+        // Ensure element is fully visible before capture
+        const element = ticketRef.current
+        const canvas = await html2canvas(element, { 
+          backgroundColor: '#fef3c7', 
+          scale: 3,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          windowHeight: element.scrollHeight + 100
+        })
+        const link = document.createElement('a')
+        link.download = `Comprovante_PontoAqui_${selectedTickets && selectedTickets.length === 1 ? new Date(selectedTickets[0].timestamp).getTime().toString(16).toUpperCase() : 'extrato'}.png`
+        link.href = canvas.toDataURL('image/png')
+        link.click()
+      } catch (err) {
+        console.error('Failed to capture ticket', err)
+        alert('Erro ao gerar imagem do comprovante.')
+      }
+    }
+  }
+
+  const sendEmail = () => {
+    const isSingle = selectedTickets.length === 1
+    const subject = isSingle ? `Comprovante de Ponto - ${employee.name}` : `Extrato de Ponto - ${employee.name}`
+    
+    let body = ''
+    if (isSingle) {
+      const t = selectedTickets[0]
+      body = `COMPROVANTE DE PONTO\n\n` +
+             `Empresa: ${settings?.companyName || 'Empresa'}\n` +
+             `Funcionário: ${employee.name}\n` +
+             `Data: ${format(new Date(t.timestamp), 'dd/MM/yyyy')}\n` +
+             `Hora: ${format(new Date(t.timestamp), 'HH:mm')}\n` +
+             `Registro: ${RECORD_TYPES[t.type]?.label}\n` +
+             `Chave: ${new Date(t.timestamp).getTime().toString(16).toUpperCase()}`
+    } else {
+      body = `EXTRATO DE PONTO\n\n` +
+             `Empresa: ${settings?.companyName || 'Empresa'}\n` +
+             `Funcionário: ${employee.name}\n` +
+             `Período: ${format(new Date(startDate), 'dd/MM')} a ${format(new Date(endDate), 'dd/MM')}\n` +
+             `Total Trabalhado: ${calculateTotalHours(selectedTickets)}\n\n` +
+             `Registros:\n` +
+             selectedTickets.map(t => `• ${format(new Date(t.timestamp), 'dd/MM HH:mm')} - ${RECORD_TYPES[t.type]?.label}`).join('\n')
+    }
+
+    const mailtoUrl = `mailto:${employee.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    window.location.href = mailtoUrl
+  }
+
   const handleContainerClick = () => {
     if (step === 'pin') inputRef.current?.focus()
   }
@@ -181,14 +310,18 @@ export function PinEntry() {
     }
   }
 
-  const handleRecord = async (type) => {
+  const handleRecord = async (type, category = null) => {
     if (isProcessing) return
-    if (RECORD_TYPES[type].needsReason && !reason) {
+    if (RECORD_TYPES[type].needsReason && !category) {
       setSelectedType(type)
       return
     }
 
-    const now = new Date()
+    if (category) {
+      setExtraCategory(category)
+    }
+
+    const now = simulateTime ? new Date(`${customDate}T${customTime}:00`) : new Date()
     
     // Safety check: Prevent duplicate records within 1 minute
     if (todayRecords.length > 0) {
@@ -211,20 +344,62 @@ export function PinEntry() {
   }
 
   const saveFinalRecord = async (photoData) => {
+    // Wi-Fi Geofence Check (Simulated for Web)
+    if (settings?.wifiGeofenceEnabled && settings.allowedSSID) {
+      const isCorrectWifi = confirm(`O sistema está configurado para permitir ponto apenas na rede "${settings.allowedSSID}". Você está conectado a esta rede?`)
+      if (!isCorrectWifi) {
+        alert('Registro negado: Você deve estar conectado ao Wi-Fi da empresa.')
+        return
+      }
+    }
+
     setIsProcessing(true)
-    const now = new Date()
+    const now = simulateTime ? new Date(`${customDate}T${customTime}:00`) : new Date()
 
     const saveRecord = async (locationData = null) => {
       const recordData = {
         employeeId: employee.id,
         timestamp: now.toISOString(),
-        type: selectedType, // Use state here, as it was set in handleRecord
-        comment: reason
+        type: selectedType, 
+        comment: extraCategory ? { medico: 'Médico', pessoal: 'Pessoal', servico: 'A Serviço' }[extraCategory] : '',
+        category: extraCategory,
+        status: extraCategory === 'medico' ? 'pending' : 'auto'
       }
       if (locationData) recordData.location = locationData
       if (photoData) recordData.photo = photoData
       
       await db.records.add(recordData)
+
+      // Create Admin Notifications
+      if (extraCategory === 'medico') {
+        await db.notifications.add({
+          type: 'medical',
+          message: `${employee.name} registrou uma saída para o médico e anexou um comprovante/foto.`,
+          timestamp: new Date(),
+          read: false,
+          employeeId: employee.id
+        })
+      }
+
+      // Late Check-in Notification
+      if (selectedType === 'check_in' && employee.shiftStart) {
+        const [h, m] = employee.shiftStart.split(':').map(Number)
+        const shiftStart = new Date(now)
+        shiftStart.setHours(h, m, 0, 0)
+        
+        if (now > shiftStart) {
+          const diffMin = Math.round((now - shiftStart) / 60000)
+          if (diffMin > 5) { // 5 min grace period
+            await db.notifications.add({
+              type: 'late',
+              message: `${employee.name} chegou com ${diffMin} minutos de atraso (Turno: ${employee.shiftStart}).`,
+              timestamp: new Date(),
+              read: false,
+              employeeId: employee.id
+            })
+          }
+        }
+      }
 
       setRecordedTime(now)
       setStep('success')
@@ -286,6 +461,7 @@ export function PinEntry() {
   const isTypeDisabled = (type) => {
     const hasCheckIn = todayRecords.some(r => r.type === 'check_in')
     const hasCheckOut = todayRecords.some(r => r.type === 'check_out')
+    const hasLunchOut = todayRecords.some(r => r.type === 'lunch_out')
 
     // If already checked out definitively, everything is disabled
     if (hasCheckOut) return true
@@ -297,6 +473,9 @@ export function PinEntry() {
 
     // If already has a check_in, you can't check_in again
     if (type === 'check_in' && hasCheckIn) return true
+    
+    // Only 1 lunch per day allowed
+    if (type === 'lunch_out' && hasLunchOut) return true
 
     const lastRecord = todayRecords[todayRecords.length - 1]
     const lastType = lastRecord.type
@@ -311,9 +490,8 @@ export function PinEntry() {
         return type !== 'lunch_in'
       
       case 'lunch_in':
-        // After returning from lunch: Final exit, Extra exit, or even another lunch (if allowed by HR, but here we restrict to 1 if needed)
-        // Let's allow multiple lunches just in case, or other_out
-        return !['check_out', 'other_out', 'lunch_out'].includes(type)
+        // After returning from lunch: Final exit, Extra exit
+        return !['check_out', 'other_out'].includes(type)
       
       case 'other_out':
         // During extra exit: Only Extra in allowed
@@ -451,6 +629,42 @@ export function PinEntry() {
             </div>
           </div>
 
+          {isDemo && (
+            <div className="p-6 bg-orange-500/10 border border-orange-500/20 rounded-[2.5rem] space-y-4 animate-in slide-in-from-top-4 duration-500">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-orange-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-orange-500/20">
+                    <Activity className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Ferramentas de Apresentação</h4>
+                    <p className="text-[10px] text-orange-600 font-black uppercase tracking-widest">Modo Simulação Ativo</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSimulateTime(!simulateTime)}
+                  className={`w-12 h-6 rounded-full transition-all relative ${simulateTime ? 'bg-orange-500' : 'bg-slate-300 dark:bg-slate-800'}`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${simulateTime ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+
+              {simulateTime && (
+                <div className="grid grid-cols-2 gap-4 animate-in zoom-in duration-300">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Simular Data</label>
+                    <input type="date" className="w-full p-3 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-xs font-black" value={customDate} onChange={e => setCustomDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Simular Horário</label>
+                    <input type="time" className="w-full p-3 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-xs font-black" value={customTime} onChange={e => setCustomTime(e.target.value)} />
+                  </div>
+                  <p className="col-span-2 text-[10px] text-slate-500 font-medium italic text-center">Neste modo, o ponto será registrado com o horário escolhido acima.</p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Object.entries(RECORD_TYPES).map(([key, config]) => {
               const Icon = config.icon
@@ -486,26 +700,36 @@ export function PinEntry() {
                   </button>
                   
                   {isSelected && config.needsReason && (
-                    <div className="p-4 bg-black/5 dark:bg-white/5 rounded-2xl border border-blue-500/30 space-y-3 animate-in fade-in slide-in-from-top-2">
-                      <p className="text-sm text-blue-400 flex items-center">
+                    <div className="p-4 bg-black/5 dark:bg-white/5 rounded-2xl border border-blue-500/30 space-y-4 animate-in fade-in slide-in-from-top-2">
+                      <p className="text-xs font-black text-blue-500 uppercase tracking-widest flex items-center justify-center">
                         <AlertCircle className="w-4 h-4 mr-2" />
-                        Justifique sua saída extra:
+                        Selecione o tipo de saída
                       </p>
-                      <textarea
-                        autoFocus
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                        placeholder="Ex: Consulta médica, resolver problema bancário..."
-                        className="w-full bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                        rows={2}
-                      />
-                      <button
-                        onClick={() => handleRecord(key)}
-                        disabled={!reason.trim()}
-                        className="w-full p-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 rounded-lg text-sm font-bold transition-all"
-                      >
-                        Confirmar Registro
-                      </button>
+                      
+                      <div className="grid grid-cols-1 gap-2">
+                        {[
+                          { id: 'medico', label: 'Médico', icon: Activity, desc: 'Pendente de Atestado' },
+                          { id: 'pessoal', label: 'Pessoal', icon: User, desc: 'Desconta das Horas' },
+                          { id: 'servico', label: 'A Serviço', icon: Clock, desc: 'Conta como Trabalho' }
+                        ].map(cat => (
+                          <button
+                            key={cat.id}
+                            onClick={() => handleRecord(key, cat.id)}
+                            className="flex items-center justify-between p-4 bg-white/60 dark:bg-black/40 hover:bg-white/80 dark:hover:bg-black/60 border border-black/10 dark:border-white/10 rounded-xl transition-all group/cat"
+                          >
+                            <div className="flex items-center space-x-3">
+                              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover/cat:scale-110 transition-transform">
+                                <cat.icon className="w-5 h-5 text-blue-500" />
+                              </div>
+                              <div className="text-left">
+                                <span className="text-sm font-bold block">{cat.label}</span>
+                                <span className="text-[10px] text-slate-500 uppercase font-bold">{cat.desc}</span>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover/cat:translate-x-1 transition-transform" />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -545,6 +769,19 @@ export function PinEntry() {
               <p className="text-sm">Jornada de hoje concluída! Até amanhã.</p>
             </div>
           )}
+
+          <div className="pt-4 border-t border-black/10 dark:border-white/10">
+            <button
+              onClick={() => {
+                loadHistoryRecords()
+                setStep('history')
+              }}
+              className="w-full py-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 font-bold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center border border-black/10 dark:border-white/10"
+            >
+              <FileText className="w-5 h-5 mr-2 text-blue-500" />
+              Portal do Funcionário (Meus Comprovantes)
+            </button>
+          </div>
 
           {isProcessing && (
             <div className="fixed inset-0 z-[100] bg-slate-50 dark:bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-4 animate-in fade-in">
@@ -636,6 +873,222 @@ export function PinEntry() {
               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
               <span>Redirecionando automaticamente...</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {step === 'history' && (
+        <div className="w-full max-w-sm space-y-6 animate-in fade-in duration-300 pb-10">
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl font-bold flex items-center justify-center"><FileText className="w-6 h-6 mr-2 text-blue-500" /> Histórico</h2>
+            <p className="text-slate-500 dark:text-slate-400 text-sm">Selecione um ponto ou gere um extrato.</p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-black/10 dark:border-white/10 shadow-xl space-y-4">
+            <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest text-center">Gerar Extrato por Período</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">Data Inicial</label>
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full mt-1 p-3 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl text-xs font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">Data Final</label>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full mt-1 p-3 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl text-xs font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <button onClick={handleGenerateExtract} className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest transition-all active:scale-[0.98] shadow-lg shadow-blue-500/20">
+              Gerar Extrato Consolidado
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-2">Comprovantes Individuais</h3>
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 overflow-hidden shadow-xl max-h-[40vh] overflow-y-auto">
+              {historyRecords.length === 0 ? (
+                <div className="p-8 text-center text-slate-500">Nenhum registro encontrado.</div>
+              ) : (
+                <div className="divide-y divide-black/5 dark:divide-white/5">
+                  {historyRecords.map((r, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setSelectedTickets([r])
+                        setShowQR(false)
+                        setStep('ticket')
+                      }}
+                      className="w-full p-4 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-left"
+                    >
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-900 dark:text-white text-sm">{RECORD_TYPES[r.type]?.label}</span>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs text-slate-500">{format(new Date(r.timestamp), 'dd/MM/yyyy')}</span>
+                            {r.comment && (
+                              <span className="text-[10px] text-blue-500 italic truncate max-w-[120px] font-medium">({r.comment})</span>
+                            )}
+                            {r.category === 'medico' && (
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                                r.status === 'pending' ? 'bg-orange-500/20 text-orange-500' :
+                                r.status === 'approved' ? 'bg-emerald-500/20 text-emerald-500' :
+                                'bg-red-500/20 text-red-500'
+                              }`}>
+                                {r.status === 'pending' ? 'Pendente' : r.status === 'approved' ? 'Aprovado' : 'Recusado'}
+                              </span>
+                            )}
+                          </div>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <span className="font-mono text-blue-500 font-bold">{format(new Date(r.timestamp), 'HH:mm')}</span>
+                        <FileText className="w-4 h-4 text-slate-400" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <button
+            onClick={() => setStep('select')}
+            className="w-full py-4 text-slate-500 hover:text-slate-900 dark:text-white text-xs font-bold uppercase tracking-widest transition-colors bg-black/5 dark:bg-white/5 rounded-2xl"
+          >
+            Voltar ao Início
+          </button>
+        </div>
+      )}
+
+      {step === 'ticket' && selectedTickets && selectedTickets.length > 0 && (
+        <div className="w-full max-w-sm flex flex-col items-center space-y-6 animate-in slide-in-from-bottom-8 duration-500 pb-10">
+          <div 
+            ref={ticketRef}
+            className="w-72 bg-[#fef3c7] text-[#1e293b] p-6 shadow-2xl relative overflow-hidden"
+            style={{ fontFamily: '"Courier New", Courier, monospace', borderTop: '4px dashed #cbd5e1', borderBottom: '4px dashed #cbd5e1' }}
+          >
+            <div className="text-center space-y-2 border-b border-dashed border-[#94a3b8] pb-4 mb-4">
+              <h2 className="font-black text-lg tracking-tight uppercase leading-tight">{settings?.companyName || 'Empresa'}</h2>
+              <p className="text-[10px] font-bold">{selectedTickets.length > 1 ? 'EXTRATO DE PONTO' : 'COMPROVANTE DE PONTO'}</p>
+            </div>
+            
+            <div className="space-y-4 text-sm font-bold">
+              <div>
+                <p className="text-[#64748b] text-[10px] uppercase">Funcionário</p>
+                <p className="truncate">{employee.name}</p>
+              </div>
+              
+              {selectedTickets.length === 1 ? (
+                <>
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-[#64748b] text-[10px] uppercase">Data</p>
+                      <p>{format(new Date(selectedTickets[0].timestamp), 'dd/MM/yyyy')}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[#64748b] text-[10px] uppercase">Hora</p>
+                      <p className="text-xl">{format(new Date(selectedTickets[0].timestamp), 'HH:mm')}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[#64748b] text-[10px] uppercase">Registro</p>
+                    <p>{RECORD_TYPES[selectedTickets[0].type]?.label}</p>
+                    {selectedTickets[0].comment && (
+                      <p className="text-[9px] text-[#64748b] italic mt-1 font-medium">Motivo: {selectedTickets[0].comment}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-[#64748b] text-[10px] uppercase">Chave de Autenticação (Hash)</p>
+                    <p className="text-xs break-all opacity-80">{new Date(selectedTickets[0].timestamp).getTime().toString(16).toUpperCase()}</p>
+                  </div>
+                </>
+              ) : (
+                  <div className="space-y-3">
+                    <div className="flex justify-between border-b border-dashed border-[#94a3b8] pb-1">
+                      <p className="text-[#64748b] text-[10px] uppercase">Período</p>
+                      <p className="text-xs">{format(new Date(startDate), 'dd/MM/yyyy')} a {format(new Date(endDate), 'dd/MM/yyyy')}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {selectedTickets.map((t, i) => (
+                        <div key={i} className="flex justify-between items-start text-xs border-b border-[#cbd5e1]/50 pb-1 py-1">
+                          <div className="flex flex-col text-left">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-[#64748b] text-[9px]">{format(new Date(t.timestamp), 'dd/MM')}</span>
+                              <span className="font-bold">{RECORD_TYPES[t.type]?.label}</span>
+                            </div>
+                            {t.comment && (
+                              <div className="flex items-center space-x-2">
+                                <span className="text-[8px] text-[#64748b] leading-tight italic max-w-[150px]">Motivo: {t.comment}</span>
+                                {t.category === 'medico' && (
+                                  <span className="text-[7px] font-black uppercase opacity-70">
+                                    [{t.status === 'pending' ? 'Pendente' : t.status === 'approved' ? 'Aprovado' : 'Recusado'}]
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <span className="font-black text-sm">{format(new Date(t.timestamp), 'HH:mm')}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pt-2 flex justify-between items-center border-t border-dashed border-[#94a3b8] mt-2">
+                      <p className="text-[#64748b] text-[10px] uppercase">Registros: {selectedTickets.length}</p>
+                      <p className="text-lg font-black">{calculateTotalHours(selectedTickets)}</p>
+                    </div>
+                  </div>
+              )}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-dashed border-[#94a3b8] text-center">
+              <p className="text-[9px] uppercase font-bold text-[#64748b]">Via do Trabalhador</p>
+              <p className="text-[8px] text-[#94a3b8] mt-1">{selectedTickets.length > 1 ? 'Guarde este extrato' : 'Guarde este recibo'}</p>
+            </div>
+          </div>
+
+          <div className="w-full space-y-3">
+            {showQR ? (
+              <div className="bg-white p-4 rounded-3xl flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in shadow-2xl">
+                <QRCodeSVG 
+                  value={
+                    selectedTickets.length === 1 
+                      ? `whatsapp://send?text=${encodeURIComponent('*COMPROVANTE DE PONTO*\n\n🏢 *Empresa:* ' + (settings?.companyName || 'Empresa') + '\n👤 *Funcionário:* ' + employee.name + '\n📅 *Data:* ' + format(new Date(selectedTickets[0].timestamp), 'dd/MM/yyyy') + '\n⏰ *Hora:* ' + format(new Date(selectedTickets[0].timestamp), 'HH:mm') + '\n📝 *Registro:* ' + RECORD_TYPES[selectedTickets[0].type]?.label + '\n🔑 *Hash:* ' + new Date(selectedTickets[0].timestamp).getTime().toString(16).toUpperCase())}`
+                      : `whatsapp://send?text=${encodeURIComponent('*EXTRATO DE PONTO*\n\n🏢 *Empresa:* ' + (settings?.companyName || 'Empresa') + '\n👤 *Funcionário:* ' + employee.name + '\n📅 *Período:* ' + format(new Date(startDate), 'dd/MM') + ' a ' + format(new Date(endDate), 'dd/MM') + '\n⏱️ *Total:* ' + calculateTotalHours(selectedTickets) + '\n\n' + selectedTickets.map(t => '• ' + format(new Date(t.timestamp), 'dd/MM HH:mm') + ' - ' + RECORD_TYPES[t.type]?.label.split(' ')[0]).join('\n'))}`
+                  } 
+                  size={200} 
+                />
+                <p className="text-xs font-bold text-slate-500 text-center">Abra a câmera do celular<br/>e aponte para o código.</p>
+                <button onClick={() => setShowQR(false)} className="text-[10px] font-black uppercase text-blue-500 p-2 hover:bg-blue-50 rounded-lg">Voltar aos botões</button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={downloadTicketPNG}
+                  className="py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all active:scale-[0.98] uppercase tracking-widest text-[10px] flex flex-col items-center justify-center space-y-1 shadow-lg shadow-blue-500/20"
+                >
+                  <Download className="w-5 h-5" />
+                  <span>Salvar Imagem</span>
+                </button>
+                <button
+                  onClick={() => setShowQR(true)}
+                  className="py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl transition-all active:scale-[0.98] uppercase tracking-widest text-[10px] flex flex-col items-center justify-center space-y-1 shadow-lg shadow-emerald-500/20"
+                >
+                  <QrCode className="w-5 h-5" />
+                  <span>Ler com Celular</span>
+                </button>
+                <button
+                  onClick={sendEmail}
+                  className="col-span-2 py-4 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 text-slate-900 dark:text-white font-black rounded-2xl transition-all active:scale-[0.98] uppercase tracking-widest text-[10px] flex items-center justify-center space-x-3 shadow-xl"
+                >
+                  <Mail className="w-5 h-5 text-blue-500" />
+                  <span>{employee.email ? `Enviar p/ ${employee.email}` : 'Enviar por E-mail'}</span>
+                </button>
+              </div>
+            )}
+            
+            <button
+              onClick={() => setStep('history')}
+              className="w-full py-4 text-slate-500 hover:text-slate-900 dark:text-white text-xs font-bold uppercase tracking-widest transition-colors"
+            >
+              Voltar ao Histórico
+            </button>
           </div>
         </div>
       )}

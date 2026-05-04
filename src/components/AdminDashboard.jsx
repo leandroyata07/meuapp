@@ -10,7 +10,7 @@ import {
   Camera, 
   Trash2,
   Calendar,
-  Clock as ClockIcon,
+  Clock,
   Download,
   Upload,
   Database,
@@ -24,6 +24,7 @@ import {
   Filter,
   X,
   FileWarning,
+  FileSearch,
   ArrowRight,
   ChevronRight,
   Activity,
@@ -36,9 +37,42 @@ import {
   Fingerprint,
   Moon,
   Sun,
-  Monitor
+  Monitor,
+  Building2,
+  Bell,
+  ShieldCheck,
+  Search,
+  Menu,
+  ChevronLeft,
+  MoreVertical,
+  Edit,
+  Wifi,
+  BarChart3,
+  Globe,
+  MessageCircle,
+  Info,
+  ExternalLink,
+  BookOpen,
+  Mail
 } from 'lucide-react'
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  Cell,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
+} from 'recharts'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { format, subMonths, isBefore, startOfMonth, endOfMonth, startOfYear, endOfYear, addDays, differenceInDays } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 
 const RECORD_TYPES = {
   check_in: { label: 'ENTRADA', color: 'bg-emerald-500/10 text-emerald-500' },
@@ -49,18 +83,73 @@ const RECORD_TYPES = {
   other_in: { label: 'RETORNO EXTRA', color: 'bg-indigo-500/10 text-indigo-500' },
   system_auto_checkout: { label: 'SAÍDA AUTOMÁTICA', color: 'bg-red-500/10 text-red-500' },
   admin_absence: { label: 'FALTA NÃO JUSTIFICADA', color: 'bg-red-900/30 text-red-400 border border-red-500/30' },
-  admin_excused: { label: 'ATESTADO MÉDICO/FÉRIAS', color: 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' }
+  admin_excused: { label: 'ATESTADO MÉDICO/FÉRIAS', color: 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' },
+  admin_adjustment: { label: 'AJUSTE MANUAL', color: 'bg-blue-600/20 text-blue-500 border border-blue-500/30' },
+  superseded: { label: 'SUBSTITUÍDO (AJUSTADO)', color: 'bg-slate-500/10 text-slate-400 opacity-50 line-through' }
 }
 
 export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [pendingCount, setPendingCount] = useState(0)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [departments, setDepartments] = useState([])
+  const [employees, setEmployees] = useState([])
+  const [currentTime, setCurrentTime] = useState(new Date())
   const navigate = useNavigate()
 
   useEffect(() => {
     if (!sessionStorage.getItem('isAdmin')) {
       navigate({ to: '/admin' })
     }
+    loadPendingCount()
+    loadNotifications()
+    loadData()
+    const dataTimer = setInterval(() => {
+      loadPendingCount()
+      loadNotifications()
+      loadData()
+    }, 30000)
+
+    const clockTimer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+
+    return () => {
+      clearInterval(dataTimer)
+      clearInterval(clockTimer)
+    }
   }, [])
+
+  const loadData = async () => {
+    const [depts, emps] = await Promise.all([
+      db.departments.toArray(),
+      db.employees.toArray()
+    ])
+    setDepartments(depts)
+    setEmployees(emps)
+  }
+
+  const loadPendingCount = async () => {
+    const count = await db.records.where('status').equals('pending').count()
+    setPendingCount(count)
+  }
+
+  const loadNotifications = async () => {
+    const items = await db.notifications.orderBy('timestamp').reverse().limit(10).toArray()
+    setNotifications(items)
+  }
+
+  const markNotificationRead = async (id) => {
+    await db.notifications.update(id, { read: true })
+    loadNotifications()
+  }
+
+  const clearAllNotifications = async () => {
+    await db.notifications.clear()
+    loadNotifications()
+  }
 
   const logout = () => {
     sessionStorage.removeItem('isAdmin')
@@ -69,39 +158,156 @@ export function AdminDashboard() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden text-slate-200">
-      <header className="p-4 border-b border-black/5 dark:border-white/5 flex justify-between items-center bg-slate-100 dark:bg-slate-900/50 backdrop-blur-xl shrink-0">
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white">Admin <span className="text-blue-500 font-black">PontoAqui</span></h1>
-        <button onClick={logout} className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-black/5 dark:bg-white/5 rounded-lg">
-          <LogOut className="w-5 h-5" />
-        </button>
+      <header className="h-20 lg:h-24 bg-white dark:bg-slate-900 border-b border-black/5 dark:border-white/10 px-6 lg:px-10 flex items-center justify-between sticky top-0 z-[60] backdrop-blur-xl bg-white/80 dark:bg-slate-900/80">
+        <div className="flex items-center space-x-4">
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+            className="lg:hidden p-3 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-900 dark:text-white"
+          >
+            {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+          <div className="hidden lg:flex items-center space-x-3 mr-8">
+            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+              <Fingerprint className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Ponto<span className="text-blue-600">Aqui</span></h1>
+              <p className="text-[9px] text-slate-400 uppercase font-black tracking-widest leading-none mt-1">Portal Administrativo</p>
+            </div>
+          </div>
+          <h1 className="lg:hidden text-lg font-black text-slate-900 dark:text-white">Admin</h1>
+        </div>
+
+        <div className="flex items-center space-x-3">
+          <div className="relative">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className={`p-3.5 transition-all rounded-2xl relative ${showNotifications ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'bg-slate-50 dark:bg-white/5 text-slate-500 hover:text-blue-600'}`}
+            >
+              <Bell className="w-5 h-5" />
+              {notifications.filter(n => !n.read).length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-white dark:border-slate-900 animate-bounce">
+                  {notifications.filter(n => !n.read).length}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div className="absolute right-0 mt-4 w-96 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-[2.5rem] shadow-2xl z-[100] p-6 space-y-4 animate-in slide-in-from-top-4">
+                <div className="flex justify-between items-center pb-4 border-b border-black/5 dark:border-white/5">
+                  <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-[0.2em]">Notificações</h3>
+                  <button onClick={clearAllNotifications} className="text-[10px] font-black text-blue-600 hover:text-red-500 uppercase tracking-widest transition-colors">Limpar Tudo</button>
+                </div>
+                <div className="max-h-96 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                  {notifications.length === 0 ? (
+                    <div className="text-center py-10 opacity-50">
+                      <Bell className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Nenhum aviso no momento</p>
+                    </div>
+                  ) : (
+                    notifications.map(n => (
+                      <div 
+                        key={n.id} 
+                        onClick={() => markNotificationRead(n.id)}
+                        className={`p-4 rounded-3xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-50 dark:bg-white/5 border-transparent opacity-60' : 'bg-blue-600/5 border-blue-500/20 hover:border-blue-500/40 shadow-sm'}`}
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-widest ${n.type === 'medical' ? 'bg-purple-500/10 text-purple-600' : 'bg-blue-500/10 text-blue-600'}`}>
+                            {n.type === 'medical' ? 'Atestado' : n.type === 'geofence' ? 'Localização' : 'Sistema'}
+                          </span>
+                          <span className="text-[8px] text-slate-400 font-mono">{format(n.timestamp, 'HH:mm')}</span>
+                        </div>
+                        <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-relaxed group-hover:text-blue-600 transition-colors">{n.message}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button onClick={logout} className="p-3.5 text-slate-500 dark:text-slate-400 hover:text-red-600 transition-all bg-slate-50 dark:bg-white/5 rounded-2xl hover:bg-red-50 dark:hover:bg-red-900/10">
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <nav className="flex space-x-2 p-1.5 bg-black/5 dark:bg-white/5 rounded-2xl sticky top-0 z-20 backdrop-blur-xl border border-black/5 dark:border-white/5">
-          {[
-            { id: 'dashboard', label: 'Painel', icon: Activity },
-            { id: 'employees', label: 'Equipe', icon: Users },
-            { id: 'reports', label: 'Relatórios', icon: FileText },
-            { id: 'settings', label: 'Ajustes', icon: Settings }
-          ].map(tab => (
-            <button 
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex items-center justify-center space-x-2 py-3 rounded-xl transition-all duration-300 ${activeTab === tab.id ? 'bg-blue-600 text-slate-900 dark:text-white shadow-lg shadow-blue-600/20 scale-[1.02]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-black/5 dark:bg-white/5'}`}
-            >
-              <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'animate-pulse' : ''}`} />
-              <span className="text-sm font-bold">{tab.label}</span>
-            </button>
-          ))}
+      <div className="flex-1 flex overflow-hidden relative">
+        <nav className={`
+          fixed inset-0 z-50 lg:relative lg:z-0 lg:flex lg:w-80 flex-col bg-white dark:bg-slate-900 border-r border-black/5 dark:border-white/10 transition-transform duration-500 ease-in-out
+          ${isMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        `}>
+          <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-3 mt-20 lg:mt-0">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] px-4 mb-6">Menu de Gestão</p>
+            {[
+              { id: 'dashboard', label: 'Dashboard', icon: Activity, color: 'text-blue-500' },
+              { id: 'approvals', label: 'Aprovações', icon: ShieldCheck, color: 'text-emerald-500', badge: pendingCount },
+              { id: 'employees', label: 'Colaboradores', icon: Users, color: 'text-purple-500' },
+              { id: 'reports', label: 'Relatórios', icon: FileText, color: 'text-orange-500' },
+              { id: 'settings', label: 'Preferências', icon: Settings, color: 'text-slate-400' },
+              { id: 'about', label: 'Sobre o Sistema', icon: Info, color: 'text-blue-600' }
+            ].map(tab => (
+              <button 
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id); setIsMenuOpen(false); }}
+                className={`w-full flex items-center space-x-4 px-6 py-5 rounded-[2rem] transition-all duration-300 relative group ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+              >
+                <tab.icon className={`w-6 h-6 transition-transform group-hover:scale-110 ${activeTab === tab.id ? 'scale-110' : tab.color}`} />
+                <span className="font-black text-sm tracking-tight">{tab.label}</span>
+                {tab.badge > 0 && (
+                  <span className="ml-auto bg-red-600 text-white text-[10px] w-6 h-6 flex items-center justify-center rounded-full font-black shadow-lg shadow-red-600/20">
+                    {tab.badge}
+                  </span>
+                )}
+                {activeTab === tab.id && (
+                  <div className="absolute left-0 w-1.5 h-6 bg-white rounded-full translate-x-2" />
+                )}
+              </button>
+            ))}
+          </div>
+          
+          <div className="p-8 border-t border-black/5 dark:border-white/5 space-y-6">
+            <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-[2.5rem] border border-black/5 dark:border-white/5">
+              <div className="flex items-center space-x-3 mb-2">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Servidor Local</span>
+              </div>
+              <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Banco de dados IndexedDB sincronizado.</p>
+            </div>
+          </div>
         </nav>
 
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {activeTab === 'dashboard' && <OverviewManager />}
-          {activeTab === 'employees' && <EmployeeManager />}
-          {activeTab === 'reports' && <ReportsManager />}
-          {activeTab === 'settings' && <SettingsManager />}
+        <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-[#0a0c10] transition-colors duration-500">
+          <main className="max-w-7xl mx-auto p-6 lg:p-14 space-y-12 pb-32">
+            <div className="animate-in fade-in slide-in-from-bottom-6 duration-1000">
+              {activeTab === 'dashboard' && <OverviewManager employees={employees} />}
+              {activeTab === 'approvals' && <ApprovalsManager onAction={() => { loadPendingCount(); loadData(); }} />}
+              {activeTab === 'employees' && <EmployeeManager employees={employees} departments={departments} onDataChange={loadData} />}
+              {activeTab === 'reports' && <ReportsManager employees={employees} departments={departments} onDataChange={loadData} />}
+              {activeTab === 'settings' && <SettingsManager />}
+              {activeTab === 'about' && <AboutManager />}
+            </div>
+          </main>
         </div>
       </div>
+      <footer className="h-10 bg-white dark:bg-slate-900 border-t border-black/5 dark:border-white/10 px-6 lg:px-10 flex items-center justify-between shrink-0 z-[60]">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Servidor Ativo</span>
+          </div>
+        </div>
+        <div className="flex items-center space-x-4 lg:space-x-8">
+          <div className="hidden sm:flex items-center space-x-2 text-slate-400">
+            <Calendar className="w-3 h-3" />
+            <span className="text-[8px] lg:text-[9px] font-black uppercase tracking-widest">{format(currentTime, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</span>
+          </div>
+          <div className="flex items-center space-x-2 text-blue-500">
+            <Clock className="w-3 h-3" />
+            <span className="text-[8px] lg:text-[9px] font-black uppercase tracking-[0.3em] tabular-nums">{format(currentTime, 'HH:mm:ss')}</span>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
@@ -109,10 +315,11 @@ export function AdminDashboard() {
 function OverviewManager() {
   const [stats, setStats] = useState({ present: 0, lunch: 0, absent: 0, finished: 0, total: 0 })
   const [recentActivity, setRecentActivity] = useState([])
+  const [chartData, setChartData] = useState([])
 
   useEffect(() => {
     loadDashboard()
-    const timer = setInterval(loadDashboard, 60000) // Update every minute
+    const timer = setInterval(loadDashboard, 60000)
     return () => clearInterval(timer)
   }, [])
 
@@ -130,117 +337,181 @@ function OverviewManager() {
       .toArray()
 
     let present = 0, lunch = 0, finished = 0, absent = 0
-
     allEmps.forEach(emp => {
-      const empRecords = allRecordsToday.filter(r => r.employeeId === emp.id).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
-      if (empRecords.length === 0) {
-        absent++
-      } else {
-        const lastRecordType = empRecords[0].type
-        if (['check_in', 'lunch_in', 'other_in'].includes(lastRecordType)) present++
-        else if (['lunch_out', 'other_out'].includes(lastRecordType)) lunch++
-        else if (['check_out', 'system_auto_checkout'].includes(lastRecordType)) finished++
+      const empRecords = allRecordsToday.filter(r => r.employeeId === emp.id).sort((a,b) => b.timestamp - a.timestamp)
+      if (empRecords.length === 0) absent++
+      else {
+        const last = empRecords[0].type
+        if (['check_in', 'lunch_in', 'other_in'].includes(last)) present++
+        else if (['lunch_out', 'other_out'].includes(last)) lunch++
+        else if (['check_out', 'system_auto_checkout'].includes(last)) finished++
       }
     })
 
     setStats({ present, lunch, absent, finished, total: allEmps.length })
-
-    const recent = allRecordsToday.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5)
+    
+    // Recent activity
+    const recent = allRecordsToday.sort((a,b) => b.timestamp - a.timestamp).slice(0, 5)
     setRecentActivity(recent.map(r => ({ ...r, empName: allEmps.find(e => e.id === r.employeeId)?.name || '?' })))
+
+    // Weekly Chart Data
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date()
+      d.setDate(d.getDate() - (6 - i))
+      return format(d, 'yyyy-MM-dd')
+    })
+
+    const weekStats = await Promise.all(last7Days.map(async day => {
+      const dayStart = new Date(`${day}T00:00:00`).getTime()
+      const dayEnd = new Date(`${day}T23:59:59`).getTime()
+      const recs = await db.records.where('timestamp').between(dayStart, dayEnd).toArray()
+      const uniqueEmps = new Set(recs.map(r => r.employeeId)).size
+      return { day: format(new Date(dayStart), 'dd/MM'), presencas: uniqueEmps }
+    }))
+    setChartData(weekStats)
   }
 
-  const getPercentage = (val) => stats.total === 0 ? 0 : Math.round((val / stats.total) * 100)
-
   return (
-    <div className="space-y-6 pb-20">
-      <div className="flex justify-between items-end px-1">
+    <div className="space-y-10">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white flex items-center"><PieChart className="w-7 h-7 mr-3 text-blue-500" />Visão Geral</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest mt-1">Status em Tempo Real</p>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+            <Activity className="w-8 h-8 mr-3 text-blue-600" />
+            Painel de Controle
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Acompanhamento em tempo real da equipe hoje.</p>
+        </div>
+        <div className="flex items-center space-x-2 bg-white dark:bg-slate-900 p-1.5 rounded-2xl shadow-sm border border-black/5 dark:border-white/5">
+          <div className="px-4 py-2 text-[10px] font-black text-blue-500 uppercase tracking-widest">Status Geral</div>
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-3" />
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="p-5 bg-blue-500/10 border border-blue-500/20 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-t from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-all" />
-          <UserCheck className="w-8 h-8 text-blue-500 mb-2" />
-          <p className="text-4xl font-black text-slate-900 dark:text-white">{stats.present}</p>
-          <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Trabalhando</p>
-        </div>
-        <div className="p-5 bg-orange-500/10 border border-orange-500/20 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-t from-orange-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-all" />
-          <Coffee className="w-8 h-8 text-orange-500 mb-2" />
-          <p className="text-4xl font-black text-slate-900 dark:text-white">{stats.lunch}</p>
-          <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest">Em Pausa</p>
-        </div>
-        <div className="p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-t from-emerald-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-all" />
-          <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-          <p className="text-4xl font-black text-slate-900 dark:text-white">{stats.finished}</p>
-          <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Já Saíram</p>
-        </div>
-        <div className="p-5 bg-slate-200 dark:bg-slate-800/50 border border-slate-700/50 rounded-3xl flex flex-col items-center justify-center relative overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-all" />
-          <UserX className="w-8 h-8 text-slate-500 mb-2" />
-          <p className="text-4xl font-black text-slate-900 dark:text-white">{stats.absent}</p>
-          <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Ausentes</p>
-        </div>
-      </div>
-
-      <div className="bg-black/5 dark:bg-white/5 p-6 rounded-[2rem] border border-black/5 dark:border-white/5 space-y-4">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest">Progresso do Dia</h3>
-          <span className="text-xs font-bold text-blue-400">{getPercentage(stats.present + stats.lunch + stats.finished)}% Presentes</span>
-        </div>
-        <div className="h-4 w-full bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden flex shadow-inner">
-          <div style={{ width: `${getPercentage(stats.present)}%` }} className="bg-blue-500 h-full transition-all duration-1000" />
-          <div style={{ width: `${getPercentage(stats.lunch)}%` }} className="bg-orange-500 h-full transition-all duration-1000" />
-          <div style={{ width: `${getPercentage(stats.finished)}%` }} className="bg-emerald-500 h-full transition-all duration-1000" />
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <h3 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest px-2">Atividade Recente</h3>
-        {recentActivity.length === 0 ? (
-          <p className="text-center text-slate-600 text-sm py-4">Nenhum registro hoje.</p>
-        ) : (
-          <div className="space-y-3">
-            {recentActivity.map((r, i) => {
-              const typeConfig = RECORD_TYPES[r.type] || { label: '?', color: 'bg-slate-500' }
-              return (
-                <div key={i} className="p-4 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-2xl flex justify-between items-center animate-in fade-in slide-in-from-bottom-2" style={{ animationDelay: `${i * 50}ms` }}>
-                  <div>
-                    <p className="text-slate-900 dark:text-white font-bold">{r.empName}</p>
-                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">{format(new Date(r.timestamp), 'HH:mm:ss')}</p>
-                  </div>
-                  <div className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${typeConfig.color}`}>
-                    {typeConfig.label}
-                  </div>
-                </div>
-              )
-            })}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+        {[
+          { label: 'Presentes', value: stats.present, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+          { label: 'Em Pausa', value: stats.lunch, icon: Coffee, color: 'text-orange-500', bg: 'bg-orange-500/10' },
+          { label: 'Finalizado', value: stats.finished, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+          { label: 'Ausentes', value: stats.absent, icon: UserX, color: 'text-red-500', bg: 'bg-red-500/10' }
+        ].map((item, i) => (
+          <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-sm border border-black/5 dark:border-white/5 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 group">
+            <div className={`w-12 h-12 ${item.bg} rounded-2xl flex items-center justify-center mb-4 group-hover:rotate-6 transition-transform`}>
+              <item.icon className={`w-6 h-6 ${item.color}`} />
+            </div>
+            <p className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">{item.label}</p>
+            <p className="text-4xl font-black text-slate-900 dark:text-white mt-2 tracking-tighter">{item.value}</p>
           </div>
-        )}
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-sm border border-black/5 dark:border-white/5">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center">
+              <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
+              Frequência Semanal
+            </h3>
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Últimos 7 dias</div>
+          </div>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorFreq" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888820" />
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 900, fill: '#888'}} dy={10} />
+                <YAxis hide />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 50px rgba(0,0,0,0.1)', background: '#fff', padding: '12px 20px' }}
+                  itemStyle={{ fontWeight: 900, fontSize: '12px' }}
+                />
+                <Area type="monotone" dataKey="presencas" stroke="#3b82f6" strokeWidth={4} fillOpacity={1} fill="url(#colorFreq)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-sm border border-black/5 dark:border-white/5 flex flex-col items-center justify-center text-center group">
+          <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/40 mb-6 group-hover:scale-110 transition-transform duration-500">
+            <Users className="w-10 h-10 text-white" />
+          </div>
+          <h3 className="text-xl font-black text-slate-900 dark:text-white">Total da Equipe</h3>
+          <p className="text-5xl font-black text-blue-600 mt-4 tracking-tighter">{stats.total}</p>
+          <p className="text-xs font-bold text-slate-500 mt-2 uppercase tracking-widest">Funcionários Ativos</p>
+          <div className="mt-8 w-full h-2 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-600 rounded-full transition-all duration-1000" style={{ width: `${(stats.present/stats.total)*100 || 0}%` }} />
+          </div>
+          <p className="text-[10px] font-black text-slate-400 mt-3 uppercase tracking-tighter">Taxa de Presença: {Math.round((stats.present/stats.total)*100) || 0}%</p>
+        </div>
       </div>
     </div>
   )
 }
 
-function EmployeeManager() {
-  const [employees, setEmployees] = useState([])
+function EmployeeManager({ employees, departments, onDataChange }) {
   const [showAdd, setShowAdd] = useState(false)
-  const [newEmp, setNewEmp] = useState({ name: '', pin: '', startDate: format(new Date(), 'yyyy-MM-dd'), photo: '', cpf: '' })
+  const [editingId, setEditingId] = useState(null)
+  const [deptFilter, setDeptFilter] = useState('')
+  const [showDeptCrud, setShowDeptCrud] = useState(false)
+  const [newDeptName, setNewDeptName] = useState('')
+  const [newEmp, setNewEmp] = useState({ 
+    name: '', 
+    pin: '', 
+    startDate: format(new Date(), 'yyyy-MM-dd'), 
+    photo: '', 
+    email: '',
+    shiftStart: '08:00',
+    shiftEnd: '17:00',
+    departmentId: ''
+  })
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showAll, setShowAll] = useState(false)
 
-  const load = async () => { setEmployees(await db.employees.toArray()) }
-  useEffect(() => { load() }, [])
+  useEffect(() => { onDataChange() }, [])
+
+  const formatCPF = (value) => {
+    const raw = value.replace(/\D/g, '')
+    return raw
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+      .replace(/(-\d{2})\d+?$/, '$1')
+  }
 
   const handleAdd = async (e) => {
     e.preventDefault()
     if (!newEmp.name || !newEmp.pin) return
-    await db.employees.add(newEmp)
-    setNewEmp({ name: '', pin: '', startDate: format(new Date(), 'yyyy-MM-dd'), photo: '', cpf: '' })
+    
+    if (editingId) {
+      await db.employees.update(editingId, newEmp)
+    } else {
+      await db.employees.add(newEmp)
+    }
+
+    setNewEmp({ 
+      name: '', 
+      pin: '', 
+      startDate: format(new Date(), 'yyyy-MM-dd'), 
+      photo: '', 
+      cpf: '', 
+      email: '',
+      biometricId: '',
+      shiftStart: '08:00',
+      shiftEnd: '17:00'
+    })
     setShowAdd(false)
+    setEditingId(null)
     load()
+  }
+
+  const handleEdit = (emp) => {
+    setNewEmp({ ...emp })
+    setEditingId(emp.id)
+    setShowAdd(true)
   }
 
   const handleDelete = async (id) => {
@@ -300,60 +571,221 @@ function EmployeeManager() {
   }
 
   return (
-    <div className="space-y-4 pb-20">
-      <div className="flex justify-between items-center px-1">
-        <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center"><Users className="w-6 h-6 mr-2 text-blue-500" />Gestão de Pessoal</h2>
-        <button onClick={() => setShowAdd(!showAdd)} className="bg-blue-600 hover:bg-blue-500 p-2.5 rounded-xl text-slate-900 dark:text-white transition-all shadow-lg active:scale-90">{showAdd ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}</button>
+    <div className="space-y-10">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+            <Users className="w-8 h-8 mr-3 text-blue-600" />
+            Gestão da Equipe
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Gerencie os acessos e informações dos colaboradores.</p>
+        </div>
+        <button 
+          onClick={() => {
+            if (showAdd && editingId) {
+              setEditingId(null)
+              setNewEmp({ name: '', pin: '', startDate: format(new Date(), 'yyyy-MM-dd'), photo: '', cpf: '', email: '', departmentId: '' })
+            }
+            setShowAdd(!showAdd)
+          }} 
+          className="bg-blue-600 hover:bg-blue-500 px-8 py-4 rounded-2xl text-white font-black flex items-center justify-center space-x-3 shadow-xl shadow-blue-600/20 transition-all active:scale-95 group shrink-0"
+        >
+          {showAdd ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />}
+          <span className="uppercase tracking-widest text-[10px]">{showAdd ? 'Cancelar' : 'Novo Funcionário'}</span>
+        </button>
       </div>
 
       {showAdd && (
-        <form onSubmit={handleAdd} className="p-6 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-[2.5rem] space-y-6 animate-in slide-in-from-top-4 duration-500 backdrop-blur-md">
-          <div className="flex flex-col items-center space-y-3">
-            <div className="relative group">
-              <div className="w-28 h-28 rounded-full bg-slate-200 dark:bg-slate-800 border-4 border-black/5 dark:border-white/5 flex items-center justify-center overflow-hidden shadow-2xl transition-all group-hover:border-blue-500/30">
-                {newEmp.photo ? <img src={newEmp.photo} alt="Preview" className="w-full h-full object-cover" /> : <Camera className="w-10 h-10 text-slate-600" />}
+        <form onSubmit={handleAdd} className="max-w-4xl mx-auto p-8 lg:p-12 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[3rem] shadow-2xl space-y-10 animate-in zoom-in duration-500 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600" />
+          
+          <div className="flex flex-col md:flex-row items-center md:items-start gap-10">
+            <div className="relative group shrink-0">
+              <div className="w-40 h-40 rounded-[2.5rem] bg-slate-50 dark:bg-black/40 border-4 border-black/5 dark:border-white/5 flex items-center justify-center overflow-hidden shadow-2xl transition-all group-hover:border-blue-500/50 group-hover:rotate-2">
+                {newEmp.photo ? <img src={newEmp.photo} alt="Preview" className="w-full h-full object-cover" /> : <Camera className="w-12 h-12 text-slate-300" />}
               </div>
-              <label className="absolute bottom-1 right-1 p-2.5 bg-blue-600 rounded-full cursor-pointer hover:bg-blue-500 shadow-xl transition-transform hover:scale-110 active:scale-95"><Upload className="w-4 h-4 text-slate-900 dark:text-white" /><input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} /></label>
+              <label className="absolute -bottom-2 -right-2 p-4 bg-blue-600 rounded-2xl cursor-pointer hover:bg-blue-500 shadow-2xl transition-transform hover:scale-110 active:scale-95 border-4 border-white dark:border-slate-900">
+                <Upload className="w-5 h-5 text-white" />
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+              </label>
             </div>
-            <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em]">Foto do Funcionário</p>
+            
+            <div className="flex-1 w-full space-y-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">{editingId ? 'Editar Colaborador' : 'Novas Credenciais'}</h3>
+                <p className="text-sm text-slate-500 font-medium">Os campos marcados são essenciais para o acesso.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="md:col-span-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 ml-1 mb-1 block">Nome Completo</label>
+                  <input type="text" placeholder="Ex: João da Silva" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold placeholder:font-normal" value={newEmp.name} onChange={e => setNewEmp({...newEmp, name: e.target.value})} required />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 ml-1 mb-1 block">E-mail</label>
+                  <input type="email" placeholder="email@empresa.com" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold placeholder:font-normal" value={newEmp.email || ''} onChange={e => setNewEmp({...newEmp, email: e.target.value})} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 ml-1 mb-1 block">CPF</label>
+                  <input type="text" placeholder="000.000.000-00" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold placeholder:font-normal" value={newEmp.cpf || ''} onChange={e => setNewEmp({...newEmp, cpf: formatCPF(e.target.value)})} />
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            <input type="text" placeholder="Nome Completo" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-600" value={newEmp.name} onChange={e => setNewEmp({...newEmp, name: e.target.value})} required />
-            <div className="grid grid-cols-2 gap-4">
-              <input type="text" placeholder="Senha (4 dígitos)" maxLength="4" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 text-center font-black tracking-widest" value={newEmp.pin} onChange={e => setNewEmp({...newEmp, pin: e.target.value})} required />
-              <input type="text" placeholder="CPF" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={newEmp.cpf} onChange={e => setNewEmp({...newEmp, cpf: e.target.value})} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-10 border-t border-black/5 dark:border-white/5">
+            <div className="space-y-6">
+              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-1">Jornada de Trabalho</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Entrada</label>
+                  <input type="time" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={newEmp.shiftStart} onChange={e => setNewEmp({...newEmp, shiftStart: e.target.value})} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Saída</label>
+                  <input type="time" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={newEmp.shiftEnd} onChange={e => setNewEmp({...newEmp, shiftEnd: e.target.value})} />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 mb-1 block">Setor / Departamento</label>
+                <div className="flex items-center space-x-2">
+                  <select 
+                    className="flex-1 p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold"
+                    value={String(newEmp.departmentId || '')}
+                    onChange={e => setNewEmp({...newEmp, departmentId: e.target.value})}
+                  >
+                    <option value="">Nenhum Setor</option>
+                    {departments.map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setShowDeptCrud(!showDeptCrud)} className="p-4 bg-blue-600/10 text-blue-500 rounded-2xl hover:bg-blue-600 hover:text-white transition-all border border-blue-500/20"><Plus className="w-5 h-5" /></button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-1">Segurança do Tablet</h4>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 mb-1 block">PIN de Acesso (4 dígitos)</label>
+                <input type="text" placeholder="0000" maxLength="4" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 text-center font-black tracking-[1.5em] text-2xl" value={newEmp.pin} onChange={e => setNewEmp({...newEmp, pin: e.target.value})} required />
+              </div>
+              
+              {editingId && newEmp.biometricId && (
+                <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+                      <Fingerprint className="w-5 h-5 text-white" />
+                    </div>
+                    <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Biometria Ativa</span>
+                  </div>
+                  <button type="button" onClick={() => confirm('Deseja remover a biometria?') && setNewEmp({...newEmp, biometricId: ''})} className="p-2 text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              )}
             </div>
           </div>
-          <button type="submit" className="w-full py-5 bg-blue-600 hover:bg-blue-500 text-slate-900 dark:text-white font-black rounded-2xl shadow-xl shadow-blue-900/20 transition-all active:scale-[0.98]">CADASTRAR AGORA</button>
+
+          {showDeptCrud && (
+            <div className="p-8 bg-slate-50 dark:bg-black/60 rounded-[2.5rem] border border-black/5 dark:border-white/5 space-y-6 animate-in zoom-in duration-300">
+              <div className="flex justify-between items-center">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gerenciar Setores</h4>
+                <button type="button" onClick={() => setShowDeptCrud(false)}><X className="w-4 h-4 text-slate-400" /></button>
+              </div>
+              <div className="flex space-x-3">
+                <input type="text" placeholder="Nome do novo setor..." className="flex-1 bg-white dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-xl p-4 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={newDeptName} onChange={e => setNewDeptName(e.target.value)} />
+                <button type="button" onClick={async () => { if (!newDeptName) return; const id = await db.departments.add({ name: newDeptName }); setNewDeptName(''); setNewEmp({ ...newEmp, departmentId: String(id) }); setShowDeptCrud(false); onDataChange(); }} className="px-8 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-500 transition-colors">Adicionar</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {departments.map(d => (
+                  <div key={d.id} className="flex items-center space-x-2 pl-4 pr-2 py-2 bg-white dark:bg-white/5 rounded-full border border-black/5 dark:border-white/5 group hover:border-red-500/30 transition-colors">
+                    <span className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase">{d.name}</span>
+                    <button type="button" onClick={async () => confirm(`Excluir ${d.name}?`) && await db.departments.delete(d.id) && onDataChange()} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-3 h-3" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button type="submit" className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">{editingId ? 'Salvar Alterações' : 'Finalizar Cadastro'}</button>
         </form>
       )}
 
-      <div className="grid grid-cols-1 gap-3">
-        {employees.map(emp => (
-          <div key={emp.id} className="p-4 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 hover:border-blue-500/20 rounded-[1.5rem] flex items-center justify-between group transition-all backdrop-blur-sm">
-            <div className="flex items-center space-x-4">
-              <div className="w-14 h-14 rounded-2xl bg-slate-200 dark:bg-slate-800 border border-black/10 dark:border-white/10 overflow-hidden shadow-inner">{emp.photo ? <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" /> : <Users className="w-6 h-6 text-slate-600 mx-auto mt-4" />}</div>
-              <div><p className="text-slate-900 dark:text-white font-black text-sm tracking-tight">{emp.name}</p><div className="flex items-center space-x-2 text-[10px] text-slate-500 font-mono"><ShieldAlert className="w-3 h-3 text-blue-500" /><span>PIN: {emp.pin}</span></div></div>
+      {!showAdd && (
+        <div className="space-y-8">
+          <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-slate-900 p-3 rounded-[2rem] shadow-sm border border-black/5 dark:border-white/5">
+            <div className="flex-1 relative group">
+              <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 transition-colors group-focus-within:text-blue-500" />
+              <input type="text" placeholder="Pesquisar colaborador por nome..." className="w-full p-5 pl-14 bg-transparent text-slate-900 dark:text-white outline-none font-bold placeholder:font-normal text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
-            <div className="flex items-center">
-              <button onClick={() => registerBiometrics(emp)} className={`p-3 transition-all rounded-xl opacity-0 group-hover:opacity-100 scale-90 hover:scale-100 mr-2 ${emp.biometricId ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-600 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10'}`} title={emp.biometricId ? "Biometria Ativada. Clique para sobrescrever." : "Ativar Biometria (FaceID/TouchID)"}><Fingerprint className="w-4 h-4" /></button>
-              <button onClick={() => handleDelete(emp.id)} className="p-3 text-slate-600 hover:text-red-500 transition-all bg-black/5 dark:bg-white/5 hover:bg-red-500/10 rounded-xl opacity-0 group-hover:opacity-100 scale-90 hover:scale-100"><Trash2 className="w-4 h-4" /></button>
-            </div>
+            <div className="w-px bg-black/5 dark:bg-white/5 hidden md:block my-2" />
+            <select className="md:w-72 p-5 bg-transparent text-slate-900 dark:text-white outline-none font-black text-xs uppercase tracking-widest appearance-none cursor-pointer" value={String(deptFilter)} onChange={e => setDeptFilter(e.target.value)}>
+              <option value="">Todos os Setores</option>
+              {departments.map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
+            </select>
           </div>
-        ))}
-      </div>
+
+          {!searchTerm && !showAll && !deptFilter ? (
+            <div className="py-24 text-center bg-white dark:bg-slate-900 rounded-[3rem] border border-dashed border-black/10 dark:border-white/10 shadow-sm animate-in fade-in duration-700">
+              <div className="w-24 h-24 bg-slate-50 dark:bg-black/40 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
+                <Users className="w-12 h-12 text-slate-200 dark:text-slate-800" />
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Lista Preservada</h3>
+              <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium max-w-xs mx-auto">Sua lista de funcionários está oculta para melhor organização. Use a busca ou clique abaixo.</p>
+              <button onClick={() => setShowAll(true)} className="mt-10 px-12 py-5 bg-blue-600 text-white text-[10px] font-black uppercase tracking-[0.3em] rounded-2xl hover:bg-blue-500 shadow-2xl shadow-blue-600/30 transition-all active:scale-95">Exibir Todos ({employees.length})</button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in slide-in-from-bottom-6 duration-700">
+              {employees
+                .filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                .filter(e => !deptFilter || String(e.departmentId) === String(deptFilter))
+                .map(emp => (
+                  <div key={emp.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-black/5 dark:border-white/5 hover:border-blue-500/40 transition-all duration-500 group shadow-sm hover:shadow-2xl relative overflow-hidden flex flex-col">
+                    <div className="flex items-start justify-between mb-6">
+                      <div className="w-20 h-20 rounded-3xl bg-slate-100 dark:bg-black/40 border border-black/5 dark:border-white/5 overflow-hidden shadow-inner group-hover:scale-105 transition-transform duration-500 shrink-0">
+                        {emp.photo ? <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" /> : <Users className="w-8 h-8 text-slate-300 mx-auto mt-6" />}
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-600/10 px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm">ID: {emp.id}</span>
+                        {emp.departmentId && (
+                          <span className="text-[9px] font-black text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5 px-3 py-1.5 rounded-full uppercase tracking-widest border border-black/5 dark:border-white/5">
+                            {departments.find(d => String(d.id) === String(emp.departmentId))?.name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1 min-w-0 mb-8">
+                      <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight truncate group-hover:text-blue-600 transition-colors">{emp.name}</h3>
+                      <div className="flex items-center space-x-2 mt-2">
+                        <ShieldAlert className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Acesso PIN: <span className="text-slate-900 dark:text-white">{emp.pin}</span></span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 pt-6 border-t border-black/5 dark:border-white/5">
+                      <button onClick={() => handleEdit(emp)} className="flex-1 py-3.5 bg-blue-600/5 hover:bg-blue-600 text-blue-600 hover:text-white rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2"><Edit className="w-3 h-3" /><span>Editar</span></button>
+                      <button onClick={() => registerBiometrics(emp)} className={`p-3.5 rounded-2xl transition-all ${emp.biometricId ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-50 dark:bg-white/5 text-slate-400 hover:bg-blue-600 hover:text-white'}`} title="Configurar Biometria"><Fingerprint className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete(emp.id)} className="p-3.5 bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl transition-all" title="Remover"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-function ReportsManager() {
+function ReportsManager({ employees, departments, onDataChange }) {
   const [records, setRecords] = useState([])
   const [filter, setFilter] = useState({ employeeId: '', period: 'day', date: format(new Date(), 'yyyy-MM-dd'), month: format(new Date(), 'yyyy-MM') })
-  const [employees, setEmployees] = useState([])
   const [calculatedHours, setCalculatedHours] = useState(null)
   const [isPrinting, setIsPrinting] = useState(false)
+  const [viewingPhoto, setViewingPhoto] = useState(null)
   const [showManualEntry, setShowManualEntry] = useState(false)
+  const [showActionsMenu, setShowActionsMenu] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showAllAll, setShowAllAll] = useState(false)
+  const [deptFilter, setDeptFilter] = useState('')
+  const [config, setConfig] = useState(null)
   const [manualEntryData, setManualEntryData] = useState({
     employeeId: '',
     type: 'admin_excused',
@@ -361,9 +793,15 @@ function ReportsManager() {
     endDate: format(new Date(), 'yyyy-MM-dd'),
     comment: ''
   })
+  const [adjustmentData, setAdjustmentData] = useState({
+    record: null,
+    newTime: '',
+    reason: ''
+  })
 
   useEffect(() => {
-    db.employees.toArray().then(setEmployees)
+    db.settings.get('config').then(setConfig)
+    onDataChange()
     loadRecords()
   }, [filter])
 
@@ -379,7 +817,7 @@ function ReportsManager() {
           isWorking = true
           lastStart = new Date(r.timestamp)
         }
-      } else if (['lunch_out', 'other_out', 'check_out', 'system_auto_checkout'].includes(r.type)) {
+      } else if (['lunch_out', 'other_out', 'check_out', 'system_auto_checkout', 'admin_adjustment'].includes(r.type)) {
         if (isWorking) {
           isWorking = false
           totalMs += (new Date(r.timestamp) - lastStart)
@@ -417,7 +855,14 @@ function ReportsManager() {
     })
     
     const emps = await db.employees.toArray()
-    setRecords(filtered.map(r => ({ ...r, employeeName: emps.find(e => e.id === r.employeeId)?.name || 'Excluído' })))
+    setRecords(filtered.map(r => {
+      const emp = emps.find(e => e.id === r.employeeId)
+      return { 
+        ...r, 
+        employeeName: emp?.name || 'Excluído',
+        employeeCpf: emp?.cpf || '' 
+      }
+    }))
 
     if (filter.employeeId && filtered.length > 0) {
       setCalculatedHours(calculateTotalTime(filtered))
@@ -425,6 +870,212 @@ function ReportsManager() {
       setCalculatedHours(null)
     }
   }
+
+  const exportPDF = async () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape' })
+      const config = await db.settings.get('config')
+      const emp = employees.find(e => e.id === Number(filter.employeeId))
+      const monthDate = new Date(filter.month + '-01T12:00:00')
+      const periodLabel = format(monthDate, 'MMMM / yyyy', { locale: ptBR }).toUpperCase()
+
+      // Logo handling
+      let headerX = 14
+      if (config?.companyLogo) {
+        try {
+          doc.addImage(config.companyLogo, 'PNG', 14, 10, 25, 15)
+          headerX = 42 // Push text to the right
+        } catch (e) { console.error('Erro ao carregar logo no PDF', e) }
+      }
+
+      // Header Premium
+      doc.setFontSize(20)
+      doc.setTextColor(30, 41, 59)
+      doc.setFont(undefined, 'bold')
+      doc.text(config?.companyName?.toUpperCase() || 'PONTOAQUI', headerX, 20)
+      
+      doc.setFontSize(9)
+      doc.setTextColor(100, 116, 139)
+      doc.text('ESPELHO DE PONTO - RELATÓRIO MENSAL DE FREQUÊNCIA', headerX, 26)
+      
+      doc.setDrawColor(226, 232, 240)
+      doc.line(14, 32, 282, 32)
+
+      // Employee Info
+      doc.setFontSize(9)
+      doc.setTextColor(30, 41, 59)
+      doc.text(`COLABORADOR: ${emp?.name?.toUpperCase() || 'N/A'}`, 14, 40)
+      doc.text(`CPF: ${emp?.cpf || 'N/A'}`, 14, 45)
+      doc.text(`SETOR: ${departments.find(d => d.id === emp?.departmentId)?.name?.toUpperCase() || 'N/A'}`, 100, 45)
+      doc.text(`PERÍODO: ${periodLabel}`, 200, 45)
+
+      // Group records by day and calculate balances
+      const daysInMonth = endOfMonth(monthDate).getDate()
+      const dailyData = {}
+      let totalExpectedMin = 0
+      let totalWorkedMin = 0
+      
+      const holidays = await db.holidays.toArray()
+      const [shStart, smStart] = (emp?.shiftStart || '08:00').split(':').map(Number)
+      const [shEnd, smEnd] = (emp?.shiftEnd || '17:00').split(':').map(Number)
+      const dailyExpectedMin = (shEnd * 60 + smEnd) - (shStart * 60 + smStart) - 60 // Assumes 1h lunch
+
+      for (let i = 1; i <= daysInMonth; i++) {
+        const d = new Date(monthDate.getFullYear(), monthDate.getMonth(), i)
+        const dateISO = format(d, 'yyyy-MM-dd')
+        const holiday = holidays.find(h => h.date === dateISO)
+        const isSunday = d.getDay() === 0
+        const isSaturday = d.getDay() === 6
+        const isWeekend = isSunday || isSaturday
+        const dayStr = `${i.toString().padStart(2, '0')}/${format(monthDate, 'MM/yyyy')}`
+        
+        dailyData[dayStr] = {
+          in: '-',
+          lunchOut: '-',
+          lunchIn: '-',
+          out: '-',
+          extras: [],
+          obs: [],
+          workedMin: 0,
+          expectedMin: (isWeekend || holiday) ? 0 : dailyExpectedMin,
+          isHoliday: !!holiday,
+          holidayName: holiday?.name || '',
+          isSunday,
+          isSaturday
+        }
+        
+        if (holiday) dailyData[dayStr].obs.push(`FERIADO: ${holiday.name.toUpperCase()}`)
+        else if (isSunday) dailyData[dayStr].obs.push('DOMINGO')
+        else if (isSaturday) dailyData[dayStr].obs.push('SÁBADO')
+
+        if (!isWeekend && !holiday) totalExpectedMin += dailyExpectedMin
+      }
+
+      records.forEach(r => {
+        const date = format(new Date(r.timestamp), 'dd/MM/yyyy')
+        if (dailyData[date]) {
+          const time = format(new Date(r.timestamp), 'HH:mm')
+          if (r.type === 'check_in') dailyData[date].in = time
+          else if (r.type === 'lunch_out') dailyData[date].lunchOut = time
+          else if (r.type === 'lunch_in') dailyData[date].lunchIn = time
+          else if (r.type === 'check_out' || r.type === 'system_auto_checkout' || r.type === 'admin_adjustment') dailyData[date].out = time
+          
+          if (r.type === 'other_out' || r.type === 'other_in') {
+            const reason = r.comment ? `(${r.comment.toUpperCase()})` : ''
+            dailyData[date].extras.push(`${time}${reason}`)
+          }
+          if (r.comment && !dailyData[date].obs.includes(r.comment.toUpperCase())) {
+            dailyData[date].obs.push(r.comment.toUpperCase())
+          }
+        }
+      })
+
+      const tableRows = Object.entries(dailyData).map(([date, data]) => {
+        let dailyTotalStr = '-'
+        let multiplier = 1.0
+        
+        if (data.isHoliday || data.isSunday) {
+          multiplier = 2.0
+        }
+
+        if (data.in !== '-' && data.out !== '-') {
+          const [h1, m1] = data.in.split(':').map(Number)
+          const [h2, m2] = data.out.split(':').map(Number)
+          let diff = (h2 * 60 + m2) - (h1 * 60 + m1)
+          if (data.lunchOut !== '-' && data.lunchIn !== '-') {
+            const [lh1, lm1] = data.lunchOut.split(':').map(Number)
+            const [lh2, lm2] = data.lunchIn.split(':').map(Number)
+            diff -= (lh2 * 60 + lm2) - (lh1 * 60 + lm1)
+          }
+          if (diff > 0) {
+            // Apply the multiplier for the final balance
+            const weightedDiff = Math.round(diff * multiplier)
+            data.workedMin = weightedDiff
+            totalWorkedMin += weightedDiff
+            
+            const hrs = Math.floor(diff / 60)
+            const mins = diff % 60
+            dailyTotalStr = `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
+            if (multiplier > 1) dailyTotalStr += ` (x${multiplier})`
+          }
+        }
+
+        return [
+          date,
+          data.in,
+          data.lunchOut,
+          data.lunchIn,
+          data.extras.length > 0 ? data.extras.join(' | ') : '-',
+          data.out,
+          dailyTotalStr,
+          data.obs.length > 0 ? data.obs.join('; ') : '-'
+        ]
+      })
+
+      autoTable(doc, {
+        startY: 55,
+        head: [['DATA', 'ENTRADA', 'ALMOÇO (S)', 'ALMOÇO (R)', 'PAUSAS EXTRAS', 'SAÍDA FINAL', 'TOTAL', 'OBSERVAÇÕES']],
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold', halign: 'center' },
+        styles: { fontSize: 8, cellPadding: 1.5, halign: 'center', textColor: [51, 65, 85] },
+        columnStyles: {
+          0: { fontStyle: 'bold', halign: 'center', cellWidth: 25 },
+          1: { halign: 'center' },
+          2: { halign: 'center' },
+          3: { halign: 'center' },
+          4: { fontSize: 6.5, halign: 'left', cellWidth: 55 }, 
+          5: { halign: 'center' },
+          6: { fontStyle: 'bold', textColor: [59, 130, 246], halign: 'center', cellWidth: 20 },
+          7: { fontSize: 6.5, halign: 'left' }
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] }
+      })
+
+      const finalY = (doc).lastAutoTable.finalY || 180
+      
+      // Detailed Balance Footer
+      const overtimeMin = Math.max(0, totalWorkedMin - totalExpectedMin)
+      const missingMin = Math.max(0, totalExpectedMin - totalWorkedMin)
+      const balanceMin = totalWorkedMin - totalExpectedMin
+
+      const formatMin = (m) => {
+        const abs = Math.abs(m)
+        const h = Math.floor(abs / 60)
+        const min = abs % 60
+        return `${m < 0 ? '-' : ''}${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
+      }
+
+      doc.setDrawColor(30, 41, 59)
+      doc.setLineWidth(0.5)
+      doc.line(14, finalY + 5, 282, finalY + 5)
+
+      doc.setFontSize(9)
+      doc.setFont(undefined, 'bold')
+      doc.setTextColor(30, 41, 59)
+      
+      const footerY = finalY + 12
+      doc.text(`CARGA PREVISTA: ${formatMin(totalExpectedMin)}`, 14, footerY)
+      doc.text(`TOTAL TRABALHADO: ${formatMin(totalWorkedMin)}`, 80, footerY)
+      doc.setTextColor(16, 185, 129)
+      doc.text(`EXTRAS: ${formatMin(overtimeMin)}`, 150, footerY)
+      doc.setTextColor(239, 68, 68)
+      doc.text(`FALTAS: ${formatMin(missingMin)}`, 200, footerY)
+      doc.setTextColor(balanceMin >= 0 ? 59 : 239, balanceMin >= 0 ? 130 : 68, balanceMin >= 0 ? 246 : 68)
+      doc.text(`SALDO FINAL: ${formatMin(balanceMin)}`, 250, footerY)
+
+      doc.setFontSize(7)
+      doc.setFont(undefined, 'normal')
+      doc.setTextColor(148, 163, 184)
+      doc.text(`GERADO EM ${format(new Date(), 'dd/MM/yyyy HH:mm')} - PONTOAQUI`, 14, doc.internal.pageSize.height - 8)
+
+      doc.save(`ESPELHO_PONTO_${emp?.name.replace(/\s+/g, '_').toUpperCase()}_${filter.month}.pdf`)
+    } catch (err) {
+      console.error('ERRO PDF:', err)
+      alert('ERRO AO GERAR PDF: ' + err.message)
+    }
+  }
+
 
   const exportCSV = () => {
     if (records.length === 0) return
@@ -453,11 +1104,7 @@ function ReportsManager() {
   }
 
   const handlePrint = () => {
-    setIsPrinting(true)
-    setTimeout(() => {
-      window.print()
-      setIsPrinting(false)
-    }, 500)
+    window.print()
   }
 
   const handleManualEntry = async () => {
@@ -490,6 +1137,36 @@ function ReportsManager() {
     setManualEntryData({...manualEntryData, comment: ''})
     loadRecords()
     alert(`${newRecords.length} registro(s) inserido(s) com sucesso.`)
+  }
+
+  const handleAdjustSubmit = async () => {
+    if (!adjustmentData.newTime || !adjustmentData.reason) {
+      alert('Preencha o novo horário e o motivo.')
+      return
+    }
+
+    const original = adjustmentData.record
+    const dateStr = format(new Date(original.timestamp), 'yyyy-MM-dd')
+    const newTimestamp = new Date(`${dateStr}T${adjustmentData.newTime}`).toISOString()
+
+    // 1. Mark original as superseded
+    await db.records.update(original.id, { 
+      type: 'superseded',
+      comment: `Original: ${format(new Date(original.timestamp), 'HH:mm')} | Ajustado por admin.`
+    })
+
+    // 2. Create new adjustment record
+    await db.records.add({
+      employeeId: original.employeeId,
+      timestamp: newTimestamp,
+      type: 'admin_adjustment',
+      comment: `AJUSTE: ${adjustmentData.reason} (Original era ${format(new Date(original.timestamp), 'HH:mm')})`,
+      status: 'approved'
+    })
+
+    setAdjustmentData({ record: null, newTime: '', reason: '' })
+    loadRecords()
+    alert('Ajuste realizado com sucesso e registrado na trilha de auditoria.')
   }
 
   if (isPrinting) {
@@ -541,98 +1218,346 @@ function ReportsManager() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center px-1">
-        <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center"><FileText className="w-6 h-6 mr-2 text-blue-500" />Relatórios Históricos</h2>
-        <div className="flex items-center space-x-2">
-          <button onClick={() => setShowManualEntry(!showManualEntry)} className="flex items-center space-x-2 text-[10px] font-black bg-blue-600/20 text-blue-400 px-4 py-2.5 rounded-xl hover:bg-blue-600/30 transition-all uppercase tracking-widest"><Plus className="w-4 h-4" /><span>Lançar Falta/Atestado</span></button>
-          <button onClick={handlePrint} disabled={records.length === 0 || !filter.employeeId || filter.period !== 'month'} className="flex items-center space-x-2 text-[10px] font-black bg-purple-600/20 text-purple-400 px-4 py-2.5 rounded-xl hover:bg-purple-600/30 transition-all disabled:opacity-20 uppercase tracking-widest" title={!filter.employeeId || filter.period !== 'month' ? "Selecione 1 funcionário e o filtro 'Mês'" : ""}><Printer className="w-4 h-4" /><span>Gerar Espelho</span></button>
-          <button onClick={exportCSV} disabled={records.length === 0} className="flex items-center space-x-2 text-[10px] font-black bg-emerald-600/20 text-emerald-400 px-4 py-2.5 rounded-xl hover:bg-emerald-600/30 transition-all disabled:opacity-20 uppercase tracking-widest"><Download className="w-4 h-4" /><span>Exportar</span></button>
+    <>
+      <div className="space-y-10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+            <FileText className="w-8 h-8 mr-3 text-blue-600" />
+            Relatórios Históricos
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Consulte e exporte os registros de ponto da equipe.</p>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <button onClick={() => setShowManualEntry(!showManualEntry)} className="px-5 py-3.5 bg-blue-600/10 text-blue-600 rounded-2xl hover:bg-blue-600 hover:text-white transition-all font-black text-[10px] uppercase tracking-widest flex items-center space-x-2">
+            <Plus className="w-4 h-4" />
+            <span>Lançar Falta/Atestado</span>
+          </button>
+          
+          <div className="flex items-center bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 p-1 shadow-sm">
+            <button onClick={exportPDF} disabled={records.length === 0 || !filter.employeeId || filter.period !== 'month'} className="p-2.5 text-slate-400 hover:text-purple-600 disabled:opacity-20 transition-all" title="Gerar PDF Espelho de Ponto">
+              <FileText className="w-5 h-5" />
+            </button>
+            <button onClick={handlePrint} disabled={records.length === 0 || !filter.employeeId || filter.period !== 'month'} className="p-2.5 text-slate-400 hover:text-blue-600 disabled:opacity-20 transition-all" title="Imprimir Relatório">
+              <Printer className="w-5 h-5" />
+            </button>
+            <button onClick={exportCSV} disabled={records.length === 0} className="p-2.5 text-slate-400 hover:text-emerald-600 disabled:opacity-20 transition-all" title="Exportar CSV">
+              <Download className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </div>
-      
+
       {showManualEntry && (
-        <div className="bg-blue-500/10 border border-blue-500/30 p-5 rounded-[1.5rem] space-y-4 animate-in fade-in slide-in-from-top-2 mb-6">
-          <h3 className="text-blue-400 font-bold uppercase tracking-widest text-[10px]">Ajuste Manual de Ponto (Atestados e Faltas)</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <select className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl p-3 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={manualEntryData.employeeId} onChange={e => setManualEntryData({...manualEntryData, employeeId: e.target.value})}><option value="">Selecionar Funcionário</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
-            <select className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl p-3 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={manualEntryData.type} onChange={e => setManualEntryData({...manualEntryData, type: e.target.value})}><option value="admin_excused">Atestado Médico / Férias</option><option value="admin_absence">Falta Injustificada</option></select>
+        <div className="max-w-4xl mx-auto p-8 bg-white dark:bg-slate-900 border border-blue-500/20 rounded-[2.5rem] shadow-2xl space-y-6 animate-in zoom-in duration-500 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-blue-600" />
+          <h3 className="text-lg font-black text-slate-900 dark:text-white">Ajuste Manual de Ponto</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Colaborador</label>
+              <select className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold" value={manualEntryData.employeeId} onChange={e => setManualEntryData({...manualEntryData, employeeId: e.target.value})}>
+                <option value="">Selecionar...</option>
+                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo de Registro</label>
+              <select className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold" value={manualEntryData.type} onChange={e => setManualEntryData({...manualEntryData, type: e.target.value})}>
+                <option value="admin_excused">Atestado Médico / Férias</option>
+                <option value="admin_absence">Falta Injustificada</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Inicial</label>
+              <input type="date" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={manualEntryData.startDate} onChange={e => setManualEntryData({...manualEntryData, startDate: e.target.value})} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Final</label>
+              <input type="date" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={manualEntryData.endDate} onChange={e => setManualEntryData({...manualEntryData, endDate: e.target.value})} />
+            </div>
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Justificativa / Descrição</label>
+              <input type="text" placeholder="Ex: Apresentou atestado CID..." className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={manualEntryData.comment} onChange={e => setManualEntryData({...manualEntryData, comment: e.target.value})} />
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-black">Data Inicial</label><input type="date" className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl p-3 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={manualEntryData.startDate} onChange={e => setManualEntryData({...manualEntryData, startDate: e.target.value})} /></div>
-            <div className="space-y-1"><label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-black">Data Final</label><input type="date" className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl p-3 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={manualEntryData.endDate} onChange={e => setManualEntryData({...manualEntryData, endDate: e.target.value})} /></div>
-          </div>
-          <div className="space-y-1"><label className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-black">Motivo / Descrição</label><input type="text" placeholder="Ex: Atestado CID J01, Férias..." className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl p-3 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={manualEntryData.comment} onChange={e => setManualEntryData({...manualEntryData, comment: e.target.value})} /></div>
-          <div className="flex space-x-2 pt-2">
-            <button onClick={handleManualEntry} className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-slate-900 dark:text-white font-black rounded-xl text-sm transition-all">Confirmar Lançamento</button>
-            <button onClick={() => setShowManualEntry(false)} className="px-5 py-3 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 text-slate-900 dark:text-white font-black rounded-xl text-sm transition-all">Cancelar</button>
+          <div className="flex gap-3 pt-4">
+            <button onClick={handleManualEntry} className="flex-1 py-5 bg-blue-600 text-white font-black rounded-2xl shadow-xl shadow-blue-600/30 uppercase tracking-widest text-xs transition-all active:scale-[0.98]">Confirmar Lançamento</button>
+            <button onClick={() => setShowManualEntry(false)} className="px-10 py-5 bg-slate-100 dark:bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-xs transition-all">Cancelar</button>
           </div>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3 mb-2">
-        <select className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={filter.employeeId} onChange={e => setFilter({...filter, employeeId: e.target.value})}><option value="">Todos os Funcionários</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
-        <div className="flex space-x-2">
-          <select className="w-1/3 bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={filter.period} onChange={e => setFilter({...filter, period: e.target.value})}>
-            <option value="day">Dia</option>
-            <option value="month">Mês</option>
+
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-sm border border-black/5 dark:border-white/10 space-y-6">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex-1 relative group">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <input type="text" placeholder="Pesquisar registros por funcionário..." className="w-full p-5 pl-14 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold placeholder:font-normal" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+          </div>
+          <select className="md:w-64 p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black text-xs uppercase tracking-widest appearance-none cursor-pointer" value={String(deptFilter)} onChange={e => setDeptFilter(e.target.value)}>
+            <option value="">Todos os Setores</option>
+            {departments.map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
           </select>
-          {filter.period === 'day' ? (
-            <input type="date" className="w-2/3 bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={filter.date} onChange={e => setFilter({...filter, date: e.target.value})} />
-          ) : (
-            <input type="month" className="w-2/3 bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-blue-500" value={filter.month} onChange={e => setFilter({...filter, month: e.target.value})} />
-          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-1">
+            <select className="w-full p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold" value={filter.employeeId} onChange={e => { setFilter({...filter, employeeId: e.target.value}); setShowAllAll(false); }}><option value="">Todos os Colaboradores</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
+          </div>
+          <div className="md:col-span-2 flex gap-4">
+            <select className="w-1/3 p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black text-xs uppercase tracking-widest" value={filter.period} onChange={e => setFilter({...filter, period: e.target.value})}>
+              <option value="day">Diário</option>
+              <option value="month">Mensal</option>
+            </select>
+            {filter.period === 'day' ? (
+              <input type="date" className="flex-1 p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={filter.date} onChange={e => setFilter({...filter, date: e.target.value})} />
+            ) : (
+              <input type="month" className="flex-1 p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={filter.month} onChange={e => setFilter({...filter, month: e.target.value})} />
+            )}
+          </div>
         </div>
       </div>
 
       {calculatedHours && (
-        <div className="bg-blue-600/10 border border-blue-500/20 p-5 rounded-[1.5rem] flex justify-between items-center animate-in zoom-in duration-300">
-          <div>
-            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Cálculo de Horas do Dia</p>
-            <p className="text-3xl font-black text-slate-900 dark:text-white">{calculatedHours.hours}<span className="text-sm font-bold text-slate-500 dark:text-slate-400 mx-1">h</span>{calculatedHours.minutes}<span className="text-sm font-bold text-slate-500 dark:text-slate-400 ml-1">m</span></p>
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 rounded-[3rem] shadow-xl shadow-blue-600/20 flex flex-col md:flex-row justify-between items-center text-white gap-6 animate-in zoom-in duration-500">
+          <div className="flex items-center space-x-6 text-center md:text-left">
+            <div className="w-16 h-16 bg-white/20 rounded-[1.5rem] flex items-center justify-center backdrop-blur-md">
+              <Clock className="w-8 h-8" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Total Calculado</p>
+              <p className="text-4xl font-black">{calculatedHours.hours}<span className="text-xl opacity-60 ml-1">h</span> {calculatedHours.minutes}<span className="text-xl opacity-60 ml-1">m</span></p>
+            </div>
           </div>
           {calculatedHours.isWorking && (
-            <div className="px-4 py-2 bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase rounded-2xl animate-pulse tracking-widest border border-emerald-500/30">
-              Jornada Ativa
+            <div className="px-6 py-3 bg-emerald-400 text-slate-900 text-[10px] font-black uppercase rounded-full animate-pulse tracking-widest shadow-lg">
+              Trabalho em Andamento
             </div>
           )}
         </div>
       )}
 
-      <div className="space-y-3 pb-10">
-        {records.map(r => {
-          const config = RECORD_TYPES[r.type] || { label: '?', color: 'bg-slate-500' }
-          return (
-            <div key={r.id} className="p-4 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 hover:border-black/10 dark:border-white/10 rounded-2xl flex justify-between items-center transition-all animate-in fade-in">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <p className="text-slate-900 dark:text-white font-bold">{r.employeeName}</p>
-                  {r.location && (
-                    <a href={`https://www.google.com/maps?q=${r.location.lat},${r.location.lng}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 bg-blue-500/10 p-1 rounded-full transition-colors" title="Ver Localização">
-                      <MapPin className="w-3 h-3" />
-                    </a>
-                  )}
-                  {r.photo && (
-                    <div className="relative group z-10">
-                      <button className="text-purple-400 hover:text-purple-300 bg-purple-500/10 p-1 rounded-full transition-colors" title="Ver Foto">
-                        <Camera className="w-3 h-3" />
-                      </button>
-                      <div className="absolute top-full left-0 mt-2 hidden group-hover:block z-50 animate-in fade-in zoom-in duration-200">
-                        <div className="bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 p-2 rounded-2xl shadow-2xl">
-                          <img src={r.photo} alt="Selfie" className="w-32 h-32 object-cover rounded-xl" />
+      <div className="space-y-4 pb-20">
+        {!filter.employeeId && !searchTerm && !showAllAll ? (
+          <div className="py-24 text-center bg-white dark:bg-slate-900 rounded-[3rem] border border-dashed border-black/10 dark:border-white/10 shadow-sm animate-in fade-in duration-700">
+            <div className="w-20 h-20 bg-slate-50 dark:bg-black/40 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <FileSearch className="w-10 h-10 text-slate-200 dark:text-slate-800" />
+            </div>
+            <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Histórico Oculto</h3>
+            <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium max-w-sm mx-auto">Para otimizar o carregamento, os registros são exibidos apenas sob demanda ou através dos filtros acima.</p>
+            <button onClick={() => setShowAllAll(true)} className="mt-10 px-12 py-5 bg-blue-600 text-white text-[10px] font-black uppercase tracking-[0.3em] rounded-2xl hover:bg-blue-500 shadow-2xl shadow-blue-600/30 transition-all active:scale-95">Visualizar Tudo ({records.length})</button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 animate-in slide-in-from-bottom-6 duration-700">
+            {records
+              .filter(r => {
+                if (!deptFilter) return true
+                const emp = employees.find(e => e.id === r.employeeId)
+                return String(emp?.departmentId) === String(deptFilter)
+              })
+              .filter(r => r.employeeName.toLowerCase().includes(searchTerm.toLowerCase()))
+              .map(r => {
+                const config = RECORD_TYPES[r.type] || { label: '?', color: 'bg-slate-500' }
+                return (
+                  <div key={r.id} className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-black/5 dark:border-white/5 hover:border-blue-500/30 transition-all group shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center space-x-5">
+                      <div className={`w-12 h-12 ${config.color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>
+                        <Clock className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                          {r.employeeName}
+                          {r.photo && (
+                            <button onClick={() => setViewingPhoto(viewingPhoto === r.id ? null : r.id)} className={`p-1 rounded-lg transition-colors ${viewingPhoto === r.id ? 'bg-purple-600 text-white' : 'text-purple-400 hover:bg-purple-600/10'}`}><Camera className="w-3.5 h-3.5" /></button>
+                          )}
+                          {r.location && (
+                            <a href={`https://www.google.com/maps?q=${r.location.lat},${r.location.lng}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-600"><MapPin className="w-3.5 h-3.5" /></a>
+                          )}
+                        </h4>
+                        <div className="flex items-center gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 font-mono">
+                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {format(new Date(r.timestamp), 'dd/MM/yyyy')}</span>
+                          <span className="flex items-center gap-1 text-blue-500"><Clock className="w-3 h-3" /> {format(new Date(r.timestamp), 'HH:mm')}</span>
+                          {r.employeeCpf === '000.000.000-00' && <span className="ml-2 text-[7px] bg-orange-500/20 text-orange-600 px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter">Demonstração</span>}
                         </div>
+                        {r.comment && <p className="text-[10px] text-slate-500 italic mt-2 bg-slate-50 dark:bg-white/5 px-2 py-1 rounded-lg w-fit">"{r.comment}"</p>}
                       </div>
                     </div>
-                  )}
-                </div>
-                <div className="flex items-center space-x-3 text-[10px] text-slate-500 font-mono tracking-tighter uppercase"><span className="flex items-center"><Calendar className="w-3 h-3 mr-1" /> {format(new Date(r.timestamp), 'dd/MM/yyyy')}</span><span className="flex items-center"><ClockIcon className="w-3 h-3 mr-1" /> {format(new Date(r.timestamp), 'HH:mm')}</span></div>
-                {r.comment && <div className="text-[10px] text-blue-400 italic bg-blue-500/5 px-2 py-1 rounded w-fit">{r.comment}</div>}
-              </div>
-              <div className={`px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase ${config.color}`}>{config.label}</div>
+                    
+                    <div className="flex flex-col md:flex-row items-center gap-2 shrink-0">
+                      <span className={`px-4 py-1.5 rounded-xl text-[9px] font-black tracking-widest uppercase text-white ${config.color.split(' ')[0]}`}>{config.label}</span>
+                      {r.type !== 'superseded' && r.type !== 'admin_adjustment' && r.type !== 'admin_absence' && r.type !== 'admin_excused' && (
+                        <button 
+                          onClick={() => setAdjustmentData({ record: r, newTime: format(new Date(r.timestamp), 'HH:mm'), reason: '' })}
+                          className="p-1.5 bg-slate-100 dark:bg-white/5 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all"
+                          title="Ajustar horário deste registro"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {r.photo && viewingPhoto === r.id && (
+                      <div className="md:absolute md:right-40 mt-4 md:mt-0 z-50 animate-in zoom-in">
+                        <img src={r.photo} alt="Ponto" className="w-32 h-32 rounded-2xl object-cover border-4 border-white dark:border-slate-800 shadow-2xl" />
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            }
+          </div>
+        )}
+      </div>
+      {adjustmentData.record && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-orange-500/20 rounded-[3rem] shadow-2xl p-8 lg:p-12 space-y-8 animate-in zoom-in duration-500 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-2 bg-orange-500" />
+            <div className="flex items-center justify-between">
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Ajustar Registro</h3>
+              <button onClick={() => setAdjustmentData({ record: null, newTime: '', reason: '' })} className="p-2 hover:bg-slate-100 dark:hover:bg-white/10 rounded-xl transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
-          )
-        })}
+
+            <div className="flex items-center space-x-4 p-6 bg-orange-500/5 rounded-3xl border border-orange-500/10">
+              <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-orange-500/20">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-orange-600 uppercase tracking-[0.2em]">Original: {adjustmentData.record.employeeName}</p>
+                <p className="text-xl font-black text-slate-900 dark:text-white">{format(new Date(adjustmentData.record.timestamp), "HH:mm")} ({RECORD_TYPES[adjustmentData.record.type]?.label})</p>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Novo Horário Corrigido</label>
+                <input type="time" className="w-full p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-orange-500 font-black text-xl" value={adjustmentData.newTime} onChange={e => setAdjustmentData({...adjustmentData, newTime: e.target.value})} />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Justificativa do Ajuste (Obrigatório)</label>
+                <textarea placeholder="Ex: Esqueceu de bater o ponto na saída. Confirmado via câmera..." className="w-full p-5 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-orange-500 min-h-[120px] font-medium" value={adjustmentData.reason} onChange={e => setAdjustmentData({...adjustmentData, reason: e.target.value})} />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 pt-4">
+              <button onClick={handleAdjustSubmit} className="flex-1 py-6 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-3xl shadow-2xl shadow-orange-500/30 uppercase tracking-[0.2em] text-xs transition-all active:scale-[0.98]">Confirmar e Registrar Auditoria</button>
+              <button onClick={() => setAdjustmentData({ record: null, newTime: "", reason: "" })} className="px-10 py-6 bg-slate-100 dark:bg-white/5 text-slate-500 font-black rounded-3xl uppercase tracking-[0.2em] text-xs transition-all hover:bg-slate-200 dark:hover:bg-white/10">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+    {/* Hidden Official Printable Report */}
+    <div id="printable-report-content" className="hidden print:block fixed inset-0 bg-white z-[9999] p-4 text-black">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page { size: landscape; margin: 1cm; }
+          body * { visibility: hidden; }
+          #printable-report-content, #printable-report-content * { visibility: visible; }
+          #printable-report-content { position: absolute; left: 0; top: 0; width: 100%; border: none !important; }
+        }
+      ` }} />
+      
+      <div className="flex justify-between items-start mb-6 border-b pb-4 text-black">
+        <div className="flex items-center gap-4">
+          {config?.companyLogo && <img src={config.companyLogo} className="w-16 h-10 object-contain" />}
+          <div>
+            <h1 className="text-xl font-bold uppercase">{config?.companyName || 'PONTOAQUI'}</h1>
+            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Espelho de Ponto - Relatório Mensal de Frequência</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xs font-bold uppercase">Período: {format(new Date(filter.month + '-01T12:00:00'), 'MMMM / yyyy', { locale: ptBR }).toUpperCase()}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-8 mb-6 text-[10px] font-bold uppercase text-black">
+        <div>
+          <p>Colaborador: {employees.find(e => e.id === Number(filter.employeeId))?.name || 'N/A'}</p>
+          <p>CPF: {employees.find(e => e.id === Number(filter.employeeId))?.cpf || 'N/A'}</p>
+        </div>
+        <div className="text-right">
+          <p>Setor: {departments.find(d => d.id === employees.find(e => e.id === Number(filter.employeeId))?.departmentId)?.name || 'N/A'}</p>
+        </div>
+      </div>
+
+      <table className="w-full border-collapse text-[8px] mb-8 text-black">
+        <thead>
+          <tr className="bg-slate-100 text-black uppercase font-bold">
+            <th className="border border-black p-1">Data</th>
+            <th className="border border-black p-1">Entrada</th>
+            <th className="border border-black p-1">Almoço (S)</th>
+            <th className="border border-black p-1">Almoço (R)</th>
+            <th className="border border-black p-1">Pausas Extras</th>
+            <th className="border border-black p-1">Saída Final</th>
+            <th className="border border-black p-1">Total</th>
+            <th className="border border-black p-1">Observações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(
+            (() => {
+              const monthDate = new Date(filter.month + '-01T12:00:00')
+              const daysInMonth = endOfMonth(monthDate).getDate()
+              const daily = {}
+              for (let i = 1; i <= daysInMonth; i++) {
+                const d = new Date(monthDate.getFullYear(), monthDate.getMonth(), i)
+                const dayStr = `${i.toString().padStart(2, '0')}/${format(monthDate, 'MM/yyyy')}`
+                daily[dayStr] = { in: '-', lunchOut: '-', lunchIn: '-', out: '-', extras: [], obs: [], multiplier: (d.getDay() === 0) ? 2 : 1 }
+                if (d.getDay() === 0) daily[dayStr].obs.push('DOMINGO')
+                else if (d.getDay() === 6) daily[dayStr].obs.push('SÁBADO')
+              }
+              records.forEach(r => {
+                const date = format(new Date(r.timestamp), 'dd/MM/yyyy')
+                if (daily[date]) {
+                  const time = format(new Date(r.timestamp), 'HH:mm')
+                  if (r.type === 'check_in') daily[date].in = time
+                  else if (r.type === 'lunch_out') daily[date].lunchOut = time
+                  else if (r.type === 'lunch_in') daily[date].lunchIn = time
+                  else if (r.type === 'check_out' || r.type === 'system_auto_checkout' || r.type === 'admin_adjustment') daily[date].out = time
+                  if (r.type === 'other_out' || r.type === 'other_in') daily[date].extras.push(`${time}${r.comment ? `(${r.comment.toUpperCase()})` : ''}`)
+                  if (r.comment && !daily[date].obs.includes(r.comment.toUpperCase())) daily[date].obs.push(r.comment.toUpperCase())
+                }
+              })
+              return daily
+            })()
+          ).map(([date, data], idx) => {
+            let dailyTotalStr = '-'
+            if (data.in !== '-' && data.out !== '-') {
+              const [h1, m1] = data.in.split(':').map(Number); const [h2, m2] = data.out.split(':').map(Number)
+              let diff = (h2 * 60 + m2) - (h1 * 60 + m1)
+              if (data.lunchOut !== '-' && data.lunchIn !== '-') {
+                const [lh1, lm1] = data.lunchOut.split(':').map(Number); const [lh2, lm2] = data.lunchIn.split(':').map(Number)
+                diff -= (lh2 * 60 + lm2) - (lh1 * 60 + lm1)
+              }
+              if (diff > 0) dailyTotalStr = `${Math.floor(diff/60).toString().padStart(2,'0')}:${(diff%60).toString().padStart(2,'0')}${data.multiplier > 1 ? ` (x${data.multiplier})` : ''}`
+            }
+            return (
+              <tr key={idx} className="bg-white">
+                <td className="border border-black p-1 font-bold text-center">{date}</td>
+                <td className="border border-black p-1 text-center">{data.in}</td>
+                <td className="border border-black p-1 text-center">{data.lunchOut}</td>
+                <td className="border border-black p-1 text-center">{data.lunchIn}</td>
+                <td className="border border-black p-1 text-left text-[7px]">{data.extras.join(' | ') || '-'}</td>
+                <td className="border border-black p-1 text-center">{data.out}</td>
+                <td className="border border-black p-1 text-center font-bold">{dailyTotalStr}</td>
+                <td className="border border-black p-1 text-left text-[7px]">{data.obs.join('; ') || '-'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <div className="flex justify-between border-t border-black pt-4 font-bold text-[10px] uppercase text-black">
+        <p>Total Acumulado no Período: {calculatedHours ? `${calculatedHours.hours}h ${calculatedHours.minutes}m` : '00:00'}</p>
+        <p className="text-[7px] text-gray-400 italic">Relatório Oficial Gerado Eletronicamente via PontoAqui</p>
+      </div>
+
+      <div className="mt-24 flex justify-around text-[9px] font-bold uppercase text-black">
+        <div className="text-center border-t border-black pt-2 w-64">Assinatura do Colaborador</div>
+        <div className="text-center border-t border-black pt-2 w-64">Assinatura do Gestor</div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -641,7 +1566,7 @@ function SettingsManager() {
   const [stats, setStats] = useState({ employees: 0, records: 0, dbSize: '...' })
   const [employees, setEmployees] = useState([])
   const [activeSubTab, setActiveSubTab] = useState('general')
-  const [themeMode, setThemeMode] = useState(localStorage.getItem('theme') || 'dark')
+  const [themeMode, setThemeMode] = useState(localStorage.getItem('theme') || 'light')
   
   const handleThemeChange = (newTheme) => {
     setThemeMode(newTheme)
@@ -657,6 +1582,7 @@ function SettingsManager() {
   const [showPreview, setShowPreview] = useState(false)
   const [previewRecords, setPreviewRecords] = useState([])
   const [confirmModal, setConfirmModal] = useState({ show: false, password: '' })
+  const [isDemoLoading, setIsDemoLoading] = useState(false)
   
   const [delFilter, setDelFilter] = useState({
     employeeId: '',
@@ -672,6 +1598,39 @@ function SettingsManager() {
     db.employees.toArray().then(setEmployees)
     updateStats()
   }, [])
+
+  const toggleDemoMode = async () => {
+    setIsDemoLoading(true)
+    const newStatus = !settings.demoModeEnabled
+    
+    if (newStatus) {
+      // Activate: Create Test Employee if not exists
+      const testEmp = employees.find(e => e.cpf === '000.000.000-00')
+      if (!testEmp) {
+        await db.employees.add({
+          name: 'TESTE (DEMO) - FUNCIONÁRIO',
+          pin: '0000',
+          cpf: '000.000.000-00',
+          email: 'teste@exemplo.com',
+          shiftStart: '08:00',
+          shiftEnd: '17:00',
+          photo: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'
+        })
+      }
+    } else {
+      // Deactivate: Optional cleanup or just keep it there but hidden?
+      // User said "explicitamente marcando como funcionário teste"
+      // We'll keep it but the system will hide it if demoModeEnabled is false
+    }
+
+    const updatedSettings = { ...settings, demoModeEnabled: newStatus }
+    await db.settings.put(updatedSettings)
+    setSettings(updatedSettings)
+    updateStats()
+    db.employees.toArray().then(setEmployees)
+    setIsDemoLoading(false)
+    alert(`Modo Demonstração ${newStatus ? 'ATIVADO' : 'DESATIVADO'}`)
+  }
 
   const updateStats = async () => {
     const eCount = await db.employees.count()
@@ -743,197 +1702,838 @@ function SettingsManager() {
   }
 
   return (
-    <div className="space-y-6 pb-20">
-      <h2 className="text-xl font-black text-slate-900 dark:text-white px-1 flex items-center"><Settings className="w-6 h-6 mr-2 text-blue-500" />Configurações do Sistema</h2>
+    <div className="space-y-10">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+            <Settings className="w-8 h-8 mr-3 text-blue-600" />
+            Configurações do Sistema
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Gerencie as preferências, segurança e dados da plataforma.</p>
+        </div>
+      </div>
 
-      <div className="flex space-x-1 p-1 bg-black/5 dark:bg-white/5 rounded-2xl border border-black/5 dark:border-white/5">
-        {['general', 'security', 'data'].map(tab => (
+      <div className="flex flex-wrap gap-2 p-1.5 bg-white dark:bg-slate-900 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm overflow-x-auto">
+        {[
+          { id: 'general', label: 'Geral', icon: Settings },
+          { id: 'security', label: 'Segurança', icon: ShieldCheck },
+          { id: 'holidays', label: 'Feriados', icon: Calendar },
+          { id: 'data', label: 'Dados', icon: Database },
+          { id: 'cloud', label: 'Nuvem', icon: Cloud }
+        ].map(tab => (
           <button 
-            key={tab} 
-            onClick={() => setActiveSubTab(tab)} 
-            className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${activeSubTab === tab ? 'bg-black/10 dark:bg-white/10 text-blue-400 shadow-inner' : 'text-slate-500 hover:text-slate-900 dark:text-white'}`}
+            key={tab.id} 
+            onClick={() => setActiveSubTab(tab.id)} 
+            className={`flex items-center space-x-2 px-8 py-4 rounded-2xl transition-all whitespace-nowrap ${activeSubTab === tab.id ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
           >
-            {tab === 'general' ? 'Geral' : tab === 'security' ? 'Segurança' : 'Dados'}
+            <tab.icon className="w-4 h-4" />
+            <span className="text-[10px] font-black uppercase tracking-widest">{tab.label}</span>
           </button>
         ))}
       </div>
 
       {activeSubTab === 'general' && (
-        <div className="space-y-6 animate-in fade-in duration-500">
-          <div className="bg-black/5 dark:bg-white/5 p-6 rounded-[2rem] border border-black/10 dark:border-white/10 space-y-5 backdrop-blur-md">
-            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Nome da Instituição</label><input className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={settings.companyName} onChange={e => setSettings({...settings, companyName: e.target.value})} /></div>
-            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Senha Mestra Admin</label><input type="password" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={settings.adminPassword} onChange={e => setSettings({...settings, adminPassword: e.target.value})} /></div>
-            
-            <div className="space-y-2 pt-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Aparência do Sistema</label>
-              <div className="flex p-1 bg-black/5 dark:bg-white/5 rounded-2xl border border-black/5 dark:border-white/5">
-                {[ { id: 'light', icon: Sun, label: 'Claro' }, { id: 'dark', icon: Moon, label: 'Escuro' }, { id: 'system', icon: Monitor, label: 'Sistema' } ].map(t => (
-                  <button key={t.id} onClick={() => handleThemeChange(t.id)} className={`flex-1 py-3 rounded-xl flex flex-col items-center justify-center transition-all ${themeMode === t.id ? 'bg-white dark:bg-slate-800 shadow-sm text-blue-500' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>
-                    <t.icon className="w-5 h-5 mb-1" />
-                    <span className="text-[9px] font-black uppercase tracking-widest">{t.label}</span>
-                  </button>
-                ))}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-500">
+          <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-10">
+            <div className="space-y-8">
+              <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                <div className="w-2 h-6 bg-blue-600 rounded-full mr-3" />
+                Preferências Gerais
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome da Instituição</label>
+                  <input className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold" value={settings.companyName} onChange={e => setSettings({...settings, companyName: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Senha Mestra Admin</label>
+                  <input type="password" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold" value={settings.adminPassword} onChange={e => setSettings({...settings, adminPassword: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="p-8 bg-blue-600/5 border border-blue-600/20 rounded-[2.5rem] flex items-center justify-between group">
+                <div className="flex items-center space-x-6">
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${settings.demoModeEnabled ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-slate-100 dark:bg-white/5 text-slate-400'}`}>
+                    <Monitor className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Modo de Demonstração</h4>
+                    <p className="text-[10px] text-slate-500 font-medium mt-1">Ativa um funcionário fictício para apresentações.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={toggleDemoMode}
+                  disabled={isDemoLoading}
+                  className={`w-16 h-8 rounded-full transition-all relative shadow-inner ${settings.demoModeEnabled ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-800'}`}
+                >
+                  <div className={`w-6 h-6 bg-white rounded-full absolute top-1 transition-all shadow-md ${settings.demoModeEnabled ? 'left-9' : 'left-1'}`} />
+                </button>
+              </div>
+
+              <div className="space-y-4 p-8 bg-slate-50 dark:bg-black/20 rounded-[2.5rem] border border-black/5 dark:border-white/5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">Logomarca da Empresa</label>
+                <div className="flex flex-col md:flex-row items-center gap-8">
+                  <div className="w-40 h-40 bg-white dark:bg-slate-900 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-xl flex items-center justify-center overflow-hidden shrink-0 relative group">
+                    {settings.companyLogo ? (
+                      <>
+                        <img src={settings.companyLogo} alt="Logo" className="w-full h-full object-contain p-4" />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <button onClick={() => setSettings({...settings, companyLogo: ''})} className="p-3 bg-red-600 text-white rounded-xl shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-all"><Trash2 className="w-5 h-5" /></button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center opacity-30">
+                        <Building2 className="w-12 h-12 mb-2" />
+                        <span className="text-[8px] font-black uppercase tracking-widest">Sem Logo</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-4 text-center md:text-left">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">A logomarca será exibida na tela principal de batida de ponto, acima do relógio. Recomendamos imagens PNG ou SVG com fundo transparente.</p>
+                    <input 
+                      type="file" 
+                      id="logo-upload" 
+                      className="hidden" 
+                      accept="image/*" 
+                      onChange={e => {
+                        const file = e.target.files[0]
+                        if (file) {
+                          const reader = new FileReader()
+                          reader.onload = (evt) => setSettings({...settings, companyLogo: evt.target.result})
+                          reader.readAsDataURL(file)
+                        }
+                      }}
+                    />
+                    <label htmlFor="logo-upload" className="inline-flex items-center space-x-3 px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl cursor-pointer transition-all shadow-lg shadow-blue-600/20 text-[10px] font-black uppercase tracking-widest active:scale-95">
+                      <Upload className="w-4 h-4" />
+                      <span>{settings.companyLogo ? 'Alterar Logomarca' : 'Selecionar Imagem'}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">Aparência do Painel</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[ 
+                    { id: 'light', icon: Sun, label: 'Modo Claro' }, 
+                    { id: 'dark', icon: Moon, label: 'Modo Escuro' }, 
+                    { id: 'system', icon: Monitor, label: 'Automático' } 
+                  ].map(t => (
+                    <button key={t.id} onClick={() => handleThemeChange(t.id)} className={`py-5 rounded-2xl flex flex-col items-center justify-center border transition-all ${themeMode === t.id ? 'bg-blue-600 border-blue-600 text-white shadow-xl shadow-blue-600/20' : 'bg-slate-50 dark:bg-white/5 border-black/5 dark:border-white/10 text-slate-500 hover:border-blue-500/50'}`}>
+                      <t.icon className="w-6 h-6 mb-2" />
+                      <span className="text-[9px] font-black uppercase tracking-widest">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-slate-900 dark:text-white font-black rounded-2xl shadow-lg transition-all active:scale-95">SALVAR ALTERAÇÕES</button>
+            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Alterações</button>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            {[ { label: 'Equipe', val: stats.employees, icon: Users }, { label: 'Pontos', val: stats.records, icon: FileText }, { label: 'Banco', val: stats.dbSize, icon: Database } ].map((s, i) => (
-              <div key={i} className="bg-black/5 dark:bg-white/5 p-4 rounded-3xl border border-black/5 dark:border-white/5 text-center backdrop-blur-sm group hover:border-blue-500/30 transition-all">
-                <s.icon className="w-5 h-5 mx-auto mb-2 text-blue-500/50 group-hover:text-blue-500 transition-colors" />
-                <p className="text-slate-900 dark:text-white font-black text-lg leading-none">{s.val}</p>
-                <p className="text-[8px] text-slate-600 uppercase font-black tracking-tighter mt-1">{s.label}</p>
-              </div>
-            ))}
+          <div className="space-y-6">
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Métricas Globais</h3>
+            <div className="grid grid-cols-1 gap-4">
+              {[ 
+                { label: 'Colaboradores Ativos', val: stats.employees, icon: Users, color: 'text-blue-600', bg: 'bg-blue-600/10' }, 
+                { label: 'Registros de Ponto', val: stats.records, icon: FileText, color: 'text-purple-600', bg: 'bg-purple-600/10' }, 
+                { label: 'Volume em Disco', val: stats.dbSize, icon: Database, color: 'text-emerald-600', bg: 'bg-emerald-600/10' } 
+              ].map((s, i) => (
+                <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-black/5 dark:border-white/10 shadow-sm flex items-center space-x-5">
+                  <div className={`w-14 h-14 ${s.bg} rounded-2xl flex items-center justify-center shrink-0`}>
+                    <s.icon className={`w-7 h-7 ${s.color}`} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-slate-900 dark:text-white leading-none">{s.val}</p>
+                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-1.5">{s.label}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {activeSubTab === 'security' && (
-        <div className="space-y-6 animate-in fade-in duration-500">
-          <div className="bg-black/5 dark:bg-white/5 p-6 rounded-[2rem] border border-black/10 dark:border-white/10 space-y-5 backdrop-blur-md">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-slate-900 dark:text-white font-bold">Cerca Virtual (Geofencing)</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Restringir o registro de ponto a uma área específica.</p>
+        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500">
+          <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-12">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="flex-1">
+                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                  <MapPin className="w-6 h-6 mr-3 text-emerald-500" />
+                  Cerca Virtual (Geofencing)
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Restringir o registro de ponto a uma área física específica.</p>
               </div>
               <button 
                 onClick={() => setSettings({...settings, geofenceEnabled: !settings.geofenceEnabled})}
-                className={`w-12 h-6 rounded-full transition-colors relative ${settings.geofenceEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                className={`w-16 h-8 rounded-full transition-all relative shadow-inner ${settings.geofenceEnabled ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-800'}`}
               >
-                <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${settings.geofenceEnabled ? 'left-7' : 'left-1'}`} />
+                <div className={`w-6 h-6 bg-white rounded-full absolute top-1 transition-all shadow-md ${settings.geofenceEnabled ? 'left-9' : 'left-1'}`} />
               </button>
             </div>
 
             {settings.geofenceEnabled && (
-              <div className="space-y-4 pt-4 border-t border-black/10 dark:border-white/10">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Latitude Central</label><input type="number" step="any" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={settings.geofenceLat || ''} onChange={e => setSettings({...settings, geofenceLat: e.target.value})} placeholder="-23.550520" /></div>
-                  <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Longitude Central</label><input type="number" step="any" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={settings.geofenceLng || ''} onChange={e => setSettings({...settings, geofenceLng: e.target.value})} placeholder="-46.633308" /></div>
+              <div className="space-y-8 pt-8 border-t border-black/5 dark:border-white/5 animate-in slide-in-from-top-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Latitude Central</label>
+                    <input type="number" step="any" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={settings.geofenceLat || ''} onChange={e => setSettings({...settings, geofenceLat: e.target.value})} placeholder="-23.550520" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Longitude Central</label>
+                    <input type="number" step="any" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={settings.geofenceLng || ''} onChange={e => setSettings({...settings, geofenceLng: e.target.value})} placeholder="-46.633308" />
+                  </div>
                 </div>
-                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Raio Permitido (Metros)</label><input type="number" className="w-full p-4 bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={settings.geofenceRadius || ''} onChange={e => setSettings({...settings, geofenceRadius: e.target.value})} placeholder="50" /></div>
-                <button onClick={() => {
-                  if ('geolocation' in navigator) {
-                    navigator.geolocation.getCurrentPosition(pos => {
-                      setSettings({...settings, geofenceLat: pos.coords.latitude, geofenceLng: pos.coords.longitude})
-                    })
-                  }
-                }} className="w-full py-3 text-[10px] font-black text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 rounded-xl uppercase tracking-widest transition-colors">
-                  Obter Minha Localização Atual
-                </button>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Raio Permitido (Metros)</label>
+                  <input type="number" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={settings.geofenceRadius || ''} onChange={e => setSettings({...settings, geofenceRadius: e.target.value})} placeholder="50" />
+                </div>
+                <button onClick={() => navigator.geolocation.getCurrentPosition(pos => setSettings({...settings, geofenceLat: pos.coords.latitude, geofenceLng: pos.coords.longitude}))} className="w-full py-4 text-[10px] font-black text-blue-600 bg-blue-600/10 hover:bg-blue-600 hover:text-white rounded-2xl uppercase tracking-widest transition-all border border-blue-600/20">Obter Localização Atual</button>
               </div>
             )}
-            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-slate-900 dark:text-white font-black rounded-2xl shadow-lg transition-all active:scale-95">SALVAR ALTERAÇÕES</button>
+
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pt-12 border-t border-black/5 dark:border-white/5">
+              <div className="flex-1">
+                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                  <Wifi className="w-6 h-6 mr-3 text-blue-500" />
+                  Rede Wi-Fi Corporativa
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Restringir o uso do aplicativo a uma rede Wi-Fi específica.</p>
+              </div>
+              <button 
+                onClick={() => setSettings({...settings, wifiGeofenceEnabled: !settings.wifiGeofenceEnabled})}
+                className={`w-16 h-8 rounded-full transition-all relative shadow-inner ${settings.wifiGeofenceEnabled ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-800'}`}
+              >
+                <div className={`w-6 h-6 bg-white rounded-full absolute top-1 transition-all shadow-md ${settings.wifiGeofenceEnabled ? 'left-9' : 'left-1'}`} />
+              </button>
+            </div>
+
+            {settings.wifiGeofenceEnabled && (
+              <div className="space-y-2 pt-8 border-t border-black/5 dark:border-white/5 animate-in slide-in-from-top-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">SSID Permitido</label>
+                <input className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-bold" value={settings.allowedSSID || ''} onChange={e => setSettings({...settings, allowedSSID: e.target.value})} placeholder="Ex: Escritorio_WiFi" />
+              </div>
+            )}
+
+            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Segurança</button>
           </div>
         </div>
       )}
 
       {activeSubTab === 'data' && (
-        <div className="space-y-6 animate-in fade-in duration-500">
-          <div className="bg-black/5 dark:bg-white/5 p-6 rounded-[2rem] border border-black/10 dark:border-white/10 space-y-8 backdrop-blur-md">
-            <div className="space-y-4">
-              <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em] px-1">Salvaguarda Local</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={handleBackup} className="p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-3xl flex flex-col items-center group hover:bg-emerald-500/20 transition-all"><Download className="w-6 h-6 text-emerald-500 mb-2 group-hover:-translate-y-1 transition-transform" /><span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Exportar JSON</span></button>
-                <label className="p-5 bg-blue-500/10 border border-blue-500/20 rounded-3xl flex flex-col items-center group hover:bg-blue-500/20 transition-all cursor-pointer"><Upload className="w-6 h-6 text-blue-500 mb-2 group-hover:-translate-y-1 transition-transform" /><span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Restaurar</span><input type="file" accept=".json" className="hidden" onChange={handleImport} /></label>
-              </div>
+        <div className="max-w-4xl mx-auto space-y-10 animate-in fade-in duration-500">
+          <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-10">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+              <div className="w-2 h-6 bg-emerald-500 rounded-full mr-3" />
+              Salvaguarda e Restauração
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <button onClick={handleBackup} className="p-8 bg-emerald-500/10 border border-emerald-500/20 rounded-[2.5rem] flex flex-col items-center group hover:bg-emerald-500 hover:text-white transition-all shadow-sm">
+                <Download className="w-10 h-10 text-emerald-500 mb-4 group-hover:-translate-y-2 group-hover:text-white transition-all" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 group-hover:text-white transition-colors">Exportar Base (JSON)</span>
+              </button>
+              <label className="p-8 bg-blue-600/10 border border-blue-600/20 rounded-[2.5rem] flex flex-col items-center group hover:bg-blue-600 hover:text-white transition-all shadow-sm cursor-pointer">
+                <Upload className="w-10 h-10 text-blue-600 mb-4 group-hover:-translate-y-2 group-hover:text-white transition-all" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 group-hover:text-white transition-colors">Importar Backup</span>
+                <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+              </label>
             </div>
+          </div>
 
-            <div className="space-y-5 pt-6 border-t border-black/5 dark:border-white/5">
-              <h3 className="text-[10px] font-black text-red-500 uppercase tracking-[0.3em] px-1">Gestão Avançada de Dados</h3>
-              <div className="bg-black/30 p-5 rounded-[2rem] border border-black/5 dark:border-white/5 space-y-5">
-                <div className="space-y-2"><label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Filtro de Funcionário</label><select className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none appearance-none" value={delFilter.employeeId} onChange={e => setDelFilter({...delFilter, employeeId: e.target.value})}><option value="">Todos os Funcionários</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2"><label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">O que apagar?</label><select className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none" value={delFilter.scope} onChange={e => setDelFilter({...delFilter, scope: e.target.value})}><option value="records">Apenas Pontos</option><option value="employee">Perfil + Pontos</option></select></div>
-                  <div className="space-y-2"><label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Período</label><select className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm outline-none" value={delFilter.period} onChange={e => setDelFilter({...delFilter, period: e.target.value})}><option value="day">Dia</option><option value="month">Mês</option><option value="year">Ano</option><option value="custom">Customizado</option></select></div>
-                </div>
-                {delFilter.period === 'custom' ? (
-                  <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-                    <input type="date" className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-xs" value={delFilter.startDate} onChange={e => setDelFilter({...delFilter, startDate: e.target.value})} />
-                    <input type="date" className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-xs" value={delFilter.endDate} onChange={e => setDelFilter({...delFilter, endDate: e.target.value})} />
-                  </div>
+          <div className="bg-red-50 dark:bg-red-900/10 p-8 lg:p-12 rounded-[3rem] border border-red-200 dark:border-red-900/20 shadow-sm space-y-10">
+            <h3 className="text-xl font-black text-red-600 tracking-tight flex items-center">
+              <div className="w-2 h-6 bg-red-600 rounded-full mr-3" />
+              Zona de Exclusão Crítica
+            </h3>
+            <div className="space-y-6">
+              <p className="text-sm text-red-700/70 font-medium px-1">Selecione os filtros abaixo para realizar uma limpeza seletiva ou total.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <select className="p-4 bg-white dark:bg-black/40 border border-red-200 dark:border-red-900/20 rounded-2xl text-slate-900 dark:text-white text-xs font-bold outline-none" value={delFilter.employeeId} onChange={e => setDelFilter({...delFilter, employeeId: e.target.value})}><option value="">Todos os Colaboradores</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
+                <select className="p-4 bg-white dark:bg-black/40 border border-red-200 dark:border-red-900/20 rounded-2xl text-slate-900 dark:text-white text-xs font-bold outline-none" value={delFilter.scope} onChange={e => setDelFilter({...delFilter, scope: e.target.value})}><option value="records">Apenas Histórico</option><option value="employee">Perfil + Pontos</option></select>
+                <select className="p-4 bg-white dark:bg-black/40 border border-red-200 dark:border-red-900/20 rounded-2xl text-slate-900 dark:text-white text-xs font-bold outline-none" value={delFilter.period} onChange={e => setDelFilter({...delFilter, period: e.target.value})}><option value="day">Diário</option><option value="month">Mensal</option><option value="year">Anual</option><option value="custom">Custom</option></select>
+                {delFilter.period !== 'custom' ? (
+                  <input type={delFilter.period === 'day' ? 'date' : delFilter.period === 'month' ? 'month' : 'number'} className="p-4 bg-white dark:bg-black/40 border border-red-200 dark:border-red-900/20 rounded-2xl text-slate-900 dark:text-white text-xs font-black outline-none" value={delFilter.date} onChange={e => setDelFilter({...delFilter, date: e.target.value})} />
                 ) : (
-                  <input type={delFilter.period === 'day' ? 'date' : delFilter.period === 'month' ? 'month' : 'number'} className="w-full bg-slate-100 dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-2xl p-4 text-slate-900 dark:text-white text-sm" value={delFilter.date} onChange={e => setDelFilter({...delFilter, date: e.target.value})} />
+                  <div className="col-span-1 md:col-span-2 lg:col-span-1 grid grid-cols-2 gap-2">
+                    <input type="date" className="p-4 bg-white dark:bg-black/40 border border-red-200 dark:border-red-900/20 rounded-2xl text-slate-900 dark:text-white text-[10px] font-black outline-none" value={delFilter.startDate} onChange={e => setDelFilter({...delFilter, startDate: e.target.value})} />
+                    <input type="date" className="p-4 bg-white dark:bg-black/40 border border-red-200 dark:border-red-900/20 rounded-2xl text-slate-900 dark:text-white text-[10px] font-black outline-none" value={delFilter.endDate} onChange={e => setDelFilter({...delFilter, endDate: e.target.value})} />
+                  </div>
                 )}
-                <button onClick={handleRunPreview} className="w-full py-5 bg-red-600/10 hover:bg-red-600/20 text-red-500 font-black text-xs rounded-2xl border border-red-500/30 flex items-center justify-center space-x-2 transition-all">
-                  <Trash className="w-4 h-4" /><span>REVISAR E EXCLUIR FILTRADOS</span>
-                </button>
               </div>
+              <button onClick={handleRunPreview} className="w-full py-5 bg-red-600 text-white font-black text-xs rounded-2xl shadow-xl shadow-red-600/30 flex items-center justify-center space-x-3 transition-all active:scale-[0.98] uppercase tracking-[0.2em]">
+                <Trash2 className="w-5 h-5" />
+                <span>Revisar e Excluir Dados</span>
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {activeSubTab === 'holidays' && <HolidaysManager />}
       {activeSubTab === 'cloud' && (
-        <div className="animate-in fade-in duration-500">
-          <div className="bg-black/5 dark:bg-white/5 p-10 rounded-[2.5rem] border border-black/10 dark:border-white/10 text-center space-y-8 backdrop-blur-md overflow-hidden relative">
-            <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
-              <Cloud className="w-12 h-12 text-blue-500/50 animate-pulse" />
-              <div className="absolute inset-0 border-2 border-dashed border-blue-500/20 rounded-full animate-spin-slow" />
+        <div className="max-w-4xl mx-auto space-y-10 animate-in fade-in duration-500">
+          <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-10">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                <Cloud className="w-6 h-6 mr-3 text-blue-500" />
+                Sincronização em Nuvem
+              </h3>
+              <button 
+                onClick={() => setSettings({...settings, autoBackup: !settings.autoBackup})}
+                className={`w-16 h-8 rounded-full transition-all relative shadow-inner ${settings.autoBackup ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-800'}`}
+              >
+                <div className={`w-6 h-6 bg-white rounded-full absolute top-1 transition-all shadow-md ${settings.autoBackup ? 'left-9' : 'left-1'}`} />
+              </button>
             </div>
-            <div className="space-y-3">
-              <h3 className="text-slate-900 dark:text-white font-black text-xl uppercase tracking-tighter">Backup em Nuvem</h3>
-              <p className="text-xs text-slate-500 leading-relaxed max-w-[280px] mx-auto uppercase font-bold tracking-widest opacity-60">Sincronização profissional segura para seus dados críticos.</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className={`p-8 rounded-[2.5rem] border transition-all space-y-6 ${settings.googleEnabled ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-50 dark:bg-black/40 border-black/5 dark:border-white/5'}`}>
+                <img src="https://www.google.com/favicon.ico" className="w-8 h-8" alt="Google" />
+                <div>
+                  <h4 className="text-slate-900 dark:text-white font-black text-sm uppercase tracking-tight">Google Drive</h4>
+                  <p className="text-xs text-slate-500 mt-1">Backup automático via conta Google.</p>
+                </div>
+                <button 
+                  onClick={() => setSettings({...settings, googleEnabled: !settings.googleEnabled})}
+                  className={`w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all ${settings.googleEnabled ? 'bg-red-500/10 text-red-500' : 'bg-blue-600 text-white shadow-lg'}`}
+                >
+                  {settings.googleEnabled ? 'Desconectar' : 'Conectar Drive'}
+                </button>
+              </div>
+
+              <div className={`p-8 rounded-[2.5rem] border transition-all space-y-6 ${settings.oneDriveEnabled ? 'bg-blue-500/5 border-blue-500/20' : 'bg-slate-50 dark:bg-black/40 border-black/5 dark:border-white/5'}`}>
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-[8px]">MS</div>
+                <div>
+                  <h4 className="text-slate-900 dark:text-white font-black text-sm uppercase tracking-tight">OneDrive</h4>
+                  <p className="text-xs text-slate-500 mt-1">Sincronização via conta Microsoft.</p>
+                </div>
+                <button 
+                  onClick={() => setSettings({...settings, oneDriveEnabled: !settings.oneDriveEnabled})}
+                  className={`w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all ${settings.oneDriveEnabled ? 'bg-red-500/10 text-red-500' : 'bg-blue-600 text-white shadow-lg'}`}
+                >
+                  {settings.oneDriveEnabled ? 'Desconectar' : 'Conectar OneDrive'}
+                </button>
+              </div>
             </div>
-            <div className="space-y-4">
-              <button className="w-full p-5 bg-white text-black font-black rounded-3xl text-[10px] flex items-center justify-center space-x-4 shadow-xl hover:bg-slate-200 transition-all uppercase tracking-[0.2em]"><img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="G" /><span>Conectar Google Drive</span></button>
-              <button className="w-full p-5 bg-blue-600 text-slate-900 dark:text-white font-black rounded-3xl text-[10px] flex items-center justify-center space-x-4 shadow-xl shadow-blue-900/20 hover:bg-blue-500 transition-all uppercase tracking-[0.2em]"><Cloud className="w-4 h-4" /><span>Conectar OneDrive</span></button>
-            </div>
-            <p className="text-[10px] text-blue-400 font-black uppercase tracking-widest animate-pulse mt-4">Pronto para Conexão</p>
+
+            {(settings.googleEnabled || settings.oneDriveEnabled) && (
+              <div className="p-8 bg-blue-600 rounded-[2.5rem] text-white flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl shadow-blue-600/30">
+                <div className="flex items-center space-x-4">
+                  <RefreshCw className="w-8 h-8 animate-spin-slow" />
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Última Sincronização</p>
+                    <p className="text-lg font-bold">{settings.lastCloudBackup ? format(new Date(settings.lastCloudBackup), "dd/MM/yyyy 'às' HH:mm") : 'Nunca realizado'}</p>
+                  </div>
+                </div>
+                <button className="px-8 py-4 bg-white text-blue-600 font-black rounded-2xl uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all shadow-lg">Sincronizar Agora</button>
+              </div>
+            )}
+
+            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-6 bg-slate-900 dark:bg-white text-white dark:text-black font-black rounded-3xl shadow-2xl transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Tudo</button>
           </div>
         </div>
       )}
 
       {/* FULL SCREEN PREVIEW OVERLAY */}
       {showPreview && (
-        <div className="fixed inset-0 z-[100] bg-slate-50 dark:bg-slate-950 flex flex-col animate-in slide-in-from-bottom duration-300">
-          <header className="p-6 border-b border-black/5 dark:border-white/5 flex justify-between items-center bg-slate-100 dark:bg-slate-900/50 backdrop-blur-xl shrink-0">
+        <div className="fixed inset-0 z-[100] bg-white dark:bg-slate-950 flex flex-col animate-in slide-in-from-bottom duration-300">
+          <header className="p-8 border-b border-black/5 dark:border-white/5 flex justify-between items-center bg-white/80 dark:bg-slate-900/50 backdrop-blur-2xl shrink-0">
             <div>
-              <h3 className="text-slate-900 dark:text-white font-black uppercase text-base tracking-tight flex items-center"><FileWarning className="w-6 h-6 text-red-500 mr-3" />Relatório de Pré-Exclusão</h3>
-              <p className="text-[10px] text-slate-500 uppercase font-black tracking-[0.3em] mt-1">Revise os registros antes da ação definitiva</p>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                <FileWarning className="w-8 h-8 text-red-500 mr-4" />
+                Relatório de Limpeza Estrutural
+              </h3>
+              <p className="text-[10px] text-slate-500 uppercase font-black tracking-[0.3em] mt-1">Revise os registros afetados antes de confirmar a remoção definitiva</p>
             </div>
-            <button onClick={() => setShowPreview(false)} className="p-2.5 bg-black/5 dark:bg-white/5 rounded-full text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-all"><X className="w-7 h-7" /></button>
+            <button onClick={() => setShowPreview(false)} className="p-4 bg-slate-100 dark:bg-white/5 rounded-full text-slate-500 hover:text-red-500 transition-all"><X className="w-8 h-8" /></button>
           </header>
-          <div className="flex-1 overflow-y-auto p-6 space-y-3">
-            <div className="bg-blue-600 p-6 rounded-[2rem] shadow-2xl flex justify-between items-center mb-6">
-              <div><p className="text-[10px] text-blue-100 uppercase font-black opacity-70 tracking-widest mb-1">Impacto Detectado</p><p className="text-3xl font-black text-slate-900 dark:text-white">{previewRecords.length} <span className="text-xs font-bold opacity-70 uppercase tracking-widest">Pontos</span></p></div>
-              <Database className="w-10 h-10 text-slate-900 dark:text-white/20" />
-            </div>
-            {previewRecords.map((r, i) => (
-              <div key={i} className="p-4 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-2xl flex justify-between items-center animate-in fade-in" style={{ animationDelay: `${Math.min(i * 20, 400)}ms` }}>
-                <div className="flex items-center space-x-4">
-                  <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_rgba(0,0,0,0.5)] ${RECORD_TYPES[r.type]?.color.split(' ')[1]}`} />
-                  <div><p className="text-slate-900 dark:text-white font-black text-xs uppercase tracking-tight">{r.empName}</p><p className="text-[10px] text-slate-500 font-mono tracking-tighter">{format(new Date(r.timestamp), 'dd/MM/yyyy HH:mm')}</p></div>
-                </div>
-                <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase font-black tracking-widest bg-black/5 dark:bg-white/5 px-3 py-1 rounded-full">{RECORD_TYPES[r.type]?.label}</div>
+          
+          <div className="flex-1 overflow-y-auto p-8 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+              <div className="bg-red-600 p-8 rounded-[3rem] shadow-2xl shadow-red-600/20 text-white">
+                <p className="text-[10px] font-black uppercase tracking-widest opacity-70 mb-2">Total de Registros</p>
+                <p className="text-5xl font-black leading-none">{previewRecords.length}</p>
               </div>
-            ))}
+              <div className="md:col-span-2 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 p-8 rounded-[3rem] flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Escopo da Operação</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white">{delFilter.scope === 'records' ? 'Apenas Histórico de Pontos' : 'Perfis Completos + Histórico'}</p>
+                </div>
+                <Database className="w-12 h-12 text-slate-200 dark:text-white/5" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {previewRecords.map((r, i) => (
+                <div key={i} className="p-6 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/5 rounded-[2rem] flex items-center justify-between hover:border-red-500/30 transition-all animate-in fade-in" style={{ animationDelay: `${Math.min(i * 10, 400)}ms` }}>
+                  <div className="flex items-center space-x-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${RECORD_TYPES[r.type]?.color || 'bg-slate-500/10 text-slate-500'}`}>
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-slate-900 dark:text-white font-black text-xs uppercase tracking-tight">{r.empName}</p>
+                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">{format(new Date(r.timestamp), 'dd/MM/yyyy HH:mm')}</p>
+                    </div>
+                  </div>
+                  <div className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-black/5 dark:bg-white/5 rounded-full opacity-60">{RECORD_TYPES[r.type]?.label}</div>
+                </div>
+              ))}
+            </div>
           </div>
-          <footer className="p-8 bg-slate-100 dark:bg-slate-900/90 border-t border-black/10 dark:border-white/10 backdrop-blur-2xl">
-            <button onClick={() => setConfirmModal({ show: true, password: '' })} className="w-full py-6 bg-red-600 hover:bg-red-500 text-slate-900 dark:text-white font-black rounded-3xl shadow-2xl shadow-red-900/50 flex items-center justify-center space-x-4 transition-all active:scale-[0.98] uppercase tracking-widest text-sm"><Trash className="w-5 h-5" /><span>CONFIRMAR E APAGAR</span><ChevronRight className="w-5 h-5" /></button>
+
+          <footer className="p-10 bg-slate-50 dark:bg-slate-900/90 border-t border-black/5 dark:border-white/10 backdrop-blur-2xl">
+            <button onClick={() => setConfirmModal({ show: true, password: '' })} className="w-full py-8 bg-red-600 hover:bg-red-500 text-white font-black rounded-[2.5rem] shadow-2xl shadow-red-900/50 flex items-center justify-center space-x-4 transition-all active:scale-[0.98] text-xl uppercase tracking-[0.3em]">
+              <Trash2 className="w-6 h-6" />
+              <span>Confirmar Destruição</span>
+              <ChevronRight className="w-6 h-6" />
+            </button>
           </footer>
         </div>
       )}
 
       {/* PASSWORD CHALLENGE MODAL */}
       {confirmModal.show && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/98 backdrop-blur-3xl animate-in zoom-in duration-200">
-          <div className="w-full max-w-sm bg-slate-100 dark:bg-slate-900 border border-red-500/20 rounded-[3rem] p-10 space-y-10 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-600 to-transparent animate-pulse" />
-            <div className="text-center space-y-5">
-              <div className="w-24 h-24 bg-red-600/10 rounded-full flex items-center justify-center mx-auto border-4 border-red-600/5"><ShieldAlert className="w-12 h-12 text-red-600 animate-pulse" /></div>
-              <div className="space-y-1"><h3 className="text-slate-900 dark:text-white font-black uppercase text-2xl tracking-tighter">Autorização</h3><p className="text-[10px] text-slate-500 uppercase font-black tracking-[0.3em]">Senha do Administrador</p></div>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-2xl animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3.5rem] p-12 space-y-10 shadow-2xl relative border border-white/10 overflow-hidden">
+            <div className="text-center space-y-6">
+              <div className="w-24 h-24 bg-red-600/10 rounded-[2rem] flex items-center justify-center mx-auto border border-red-500/20 shadow-inner">
+                <ShieldAlert className="w-12 h-12 text-red-600 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Autorização Final</h3>
+                <p className="text-[10px] text-slate-500 uppercase font-black tracking-[0.4em]">Insira a Senha Mestra do Administrador</p>
+              </div>
             </div>
-            <input type="password" placeholder="••••" className="w-full p-6 bg-black/50 border border-black/10 dark:border-white/10 rounded-3xl text-slate-900 dark:text-white text-center text-5xl tracking-[0.4em] font-black outline-none focus:border-red-600 transition-all placeholder:text-slate-900" value={confirmModal.password} onChange={e => setConfirmModal({...confirmModal, password: e.target.value})} autoFocus />
+            
+            <div className="relative group">
+              <input 
+                type="password" 
+                placeholder="••••" 
+                className="w-full p-8 bg-slate-50 dark:bg-black/50 border border-black/5 dark:border-white/5 rounded-3xl text-slate-900 dark:text-white text-center text-6xl tracking-[0.4em] font-black outline-none focus:ring-4 focus:ring-red-600/20 focus:border-red-600 transition-all placeholder:text-slate-200 dark:placeholder:text-white/5" 
+                value={confirmModal.password} 
+                onChange={e => setConfirmModal({...confirmModal, password: e.target.value})} 
+                autoFocus 
+              />
+            </div>
+
             <div className="flex flex-col space-y-4">
-              <button onClick={runDeletion} className="w-full py-6 bg-red-600 hover:bg-red-500 text-slate-900 dark:text-white font-black rounded-2xl shadow-2xl shadow-red-900/30 transition-all active:scale-95 uppercase tracking-widest">EXECUTAR AGORA</button>
-              <button onClick={() => setConfirmModal({ show: false, password: '' })} className="flex-1 py-3 text-[10px] font-black text-slate-600 uppercase hover:text-slate-900 dark:text-white tracking-[0.2em] transition-colors">CANCELAR OPERAÇÃO</button>
+              <button onClick={runDeletion} className="w-full py-6 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl shadow-xl shadow-red-900/30 transition-all active:scale-[0.98] uppercase tracking-[0.2em]">Executar Limpeza</button>
+              <button onClick={() => setConfirmModal({ show: false, password: '' })} className="w-full py-4 text-[10px] font-black text-slate-500 uppercase hover:text-slate-900 dark:hover:text-white tracking-[0.3em] transition-colors">Abortar Missão</button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function ApprovalsManager({ onAction }) {
+  const [pendencies, setPendencies] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [filter, setFilter] = useState('pending') // 'pending' or 'all'
+
+  useEffect(() => {
+    loadPendencies()
+  }, [filter])
+
+  const loadPendencies = async () => {
+    try {
+      setIsLoading(true)
+      let query = db.records.where('category').equals('medico')
+      
+      const records = await query.toArray()
+      const filtered = filter === 'pending' 
+        ? records.filter(r => r.status === 'pending')
+        : records
+        
+      const emps = await db.employees.toArray()
+      setPendencies(filtered.map(r => ({
+        ...r,
+        employeeName: emps.find(e => e.id === r.employeeId)?.name || 'Desconhecido'
+      })).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)))
+    } catch (err) {
+      console.error('Failed to load approvals', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleAction = async (id, status) => {
+    await db.records.update(id, { status })
+    loadPendencies()
+    onAction()
+  }
+
+  if (isLoading) return <div className="flex justify-center p-10"><RefreshCw className="w-8 h-8 animate-spin text-blue-500" /></div>
+
+  return (
+    <div className="space-y-10">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+            <ShieldCheck className="w-8 h-8 mr-3 text-blue-600" />
+            Central de Aprovações
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Valide atestados e justificativas médicas da equipe.</p>
+        </div>
+        
+        <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm">
+          <button 
+            onClick={() => setFilter('pending')}
+            className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'pending' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+          >
+            Pendentes
+          </button>
+          <button 
+            onClick={() => setFilter('all')}
+            className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'all' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+          >
+            Histórico
+          </button>
+        </div>
+      </div>
+
+      {pendencies.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[3rem] p-24 text-center space-y-6 shadow-sm">
+          <div className="w-24 h-24 bg-emerald-500/10 rounded-[2.5rem] flex items-center justify-center mx-auto text-emerald-500 border border-emerald-500/20">
+            <CheckCircle2 className="w-12 h-12" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Tudo em dia!</h3>
+            <p className="text-slate-500 dark:text-slate-400 font-medium max-w-xs mx-auto">Não há solicitações pendentes de aprovação no momento.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
+          {pendencies.map((p, i) => (
+            <div key={p.id} className={`bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[2.5rem] p-8 space-y-8 shadow-sm hover:shadow-xl transition-all animate-in fade-in slide-in-from-bottom-4 ${p.status === 'rejected' ? 'opacity-60 grayscale-[0.2]' : ''}`} style={{ animationDelay: `${i * 50}ms` }}>
+              <div className="flex justify-between items-start">
+                <div className="flex items-center space-x-4">
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
+                    p.status === 'pending' ? 'bg-orange-500/10 text-orange-500' :
+                    p.status === 'approved' ? 'bg-emerald-500/10 text-emerald-500' :
+                    'bg-red-500/10 text-red-500'
+                  }`}>
+                    <Activity className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 dark:text-white text-lg tracking-tight leading-none">{p.employeeName}</h3>
+                    <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mt-2">{format(new Date(p.timestamp), "dd 'de' MMMM, HH:mm", { locale: ptBR })}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-slate-50 dark:bg-black/40 p-6 rounded-3xl border border-black/5 dark:border-white/5">
+                <div className="flex items-center space-x-2 mb-3">
+                  <FileText className="w-4 h-4 text-blue-500" />
+                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Justificativa</p>
+                </div>
+                <p className="text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed italic">"{p.comment || 'Nenhum comentário fornecido.'}"</p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                {p.status !== 'approved' && (
+                  <button 
+                    onClick={() => handleAction(p.id, 'approved')}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+                  >
+                    Aprovar
+                  </button>
+                )}
+                {p.status !== 'rejected' && (
+                  <button 
+                    onClick={() => handleAction(p.id, 'rejected')}
+                    className="flex-1 bg-red-600/10 hover:bg-red-600/20 text-red-600 py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-[0.98]"
+                  >
+                    {p.status === 'pending' ? 'Recusar' : 'Reverter'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AboutManager() {
+  const handleDownloadManual = () => {
+    const doc = new jsPDF()
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    doc.text('Manual do Sistema PontoAqui', 20, 20)
+    
+    doc.setFontSize(12)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Versão 1.0 Premium Edition', 20, 30)
+    
+    doc.setDrawColor(59, 130, 246)
+    doc.line(20, 35, 190, 35)
+    
+    const content = [
+      ['1. Registro de Ponto', 'Colaboradores usam PIN ou Biometria na tela inicial.'],
+      ['2. Aprovações', 'Atestados médicos e registros fora da cerca virtual ficam pendentes.'],
+      ['3. Relatórios', 'Gere extratos detalhados com filtros por colaborador ou período.'],
+      ['4. Cerca Virtual', 'Configure o raio de alcance permitido na aba Preferências.'],
+      ['Legislação', 'Atende ao Artigo 74, § 2º da CLT para até 20 funcionários.']
+    ]
+    
+    autoTable(doc, {
+      startY: 45,
+      head: [['Módulo', 'Descrição']],
+      body: content,
+      theme: 'grid',
+      headStyles: { fillColor: [59, 130, 246] }
+    })
+    
+    const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY : 150
+    doc.text('Desenvolvido por: Leandro Oliveira Lima', 20, finalY + 20)
+    doc.text('Site: www.leandroyata.com.br', 20, finalY + 30)
+    
+    doc.save('Manual_PontoAqui.pdf')
+  }
+
+  return (
+    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight">
+            Sobre o Ponto<span className="text-blue-600">Aqui</span>
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Informações do sistema, manual e créditos do desenvolvedor.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        <div className="lg:col-span-2 space-y-8">
+          {/* Manual Section */}
+          <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-10">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+              <BookOpen className="w-6 h-6 mr-3 text-blue-500" />
+              Manual Rápido do Sistema
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[
+                { title: 'Registro de Ponto', desc: 'Colaboradores usam PIN ou Biometria na tela inicial. O sistema captura foto e localização GPS.', color: 'bg-blue-500' },
+                { title: 'Aprovações', desc: 'Atestados médicos e registros fora da cerca virtual ficam pendentes para análise do gestor.', color: 'bg-amber-500' },
+                { title: 'Relatórios', desc: 'Gere extratos detalhados com filtros por colaborador, setor ou período.', color: 'bg-emerald-500' },
+                { title: 'Cerca Virtual', desc: 'Configure o raio de alcance permitido para registros na aba Preferências.', color: 'bg-purple-500' }
+              ].map((item, i) => (
+                <div key={i} className="p-6 bg-slate-50 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/10">
+                  <div className={`w-10 h-1 ${item.color} rounded-full mb-4`} />
+                  <h4 className="font-black text-sm text-slate-900 dark:text-white mb-2">{item.title}</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-8 bg-blue-600/5 border border-blue-500/20 rounded-[2.5rem] space-y-4">
+              <h4 className="text-xs font-black text-blue-600 uppercase tracking-widest flex items-center">
+                <ShieldAlert className="w-4 h-4 mr-2" /> Compliance & Legislação
+              </h4>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed font-medium text-justify">
+                O sistema PontoAqui foi projetado para atender aos requisitos de estabelecimentos com <strong>até 20 colaboradores</strong>, conforme o <strong>Artigo 74, § 2º da CLT</strong> (Redação dada pela Lei nº 13.874/2019). Esta legislação dispensa a obrigatoriedade de registro de ponto eletrônico complexo para empresas abaixo deste limite, permitindo o uso de sistemas simplificados e seguros de controle de jornada.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          {/* Developer Card */}
+          <div className="bg-slate-900 dark:bg-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 blur-3xl rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-1000" />
+            
+            <div className="relative z-10 space-y-6">
+              <div>
+                <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-2">Desenvolvido por</p>
+                <h3 className="text-2xl font-black text-white dark:text-slate-900 leading-tight">Leandro Oliveira Lima</h3>
+              </div>
+
+              <div className="flex flex-nowrap justify-center gap-2 pt-4 overflow-x-auto pb-2">
+                {[
+                  { icon: Mail, link: 'mailto:leandroayata07@hotmail.com', color: 'bg-blue-600', label: 'E-mail' },
+                  { icon: MessageCircle, link: 'https://wa.me/5575991902534', color: 'bg-emerald-600', label: 'WhatsApp' },
+                  { 
+                    svg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>, 
+                    link: 'https://www.instagram.com/leandroyata07_/', 
+                    color: 'bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600', 
+                    label: 'Instagram' 
+                  },
+                  { 
+                    svg: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect width="4" height="12" x="2" y="9"/><circle cx="4" cy="4" r="2"/></svg>, 
+                    link: 'https://www.linkedin.com/in/leandro-oliveira-lima-27140149/', 
+                    color: 'bg-blue-700', 
+                    label: 'LinkedIn' 
+                  },
+                  { icon: Globe, link: 'http://www.leandroyata.com.br', color: 'bg-slate-600', label: 'Site' }
+                ].map((social, i) => (
+                  <a 
+                    key={i} 
+                    href={social.link} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className={`${social.color} p-3 rounded-xl text-white shadow-lg hover:scale-110 active:scale-95 transition-all group/icon relative shrink-0`}
+                    title={social.label}
+                  >
+                    {social.icon ? <social.icon className="w-4 h-4" /> : social.svg}
+                    <span className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-800 text-[8px] font-black uppercase px-2 py-1 rounded opacity-0 group-hover/icon:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                      {social.label}
+                    </span>
+                  </a>
+                ))}
+              </div>
+
+              <div className="pt-6 border-t border-white/10 dark:border-black/5 text-center space-y-1">
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-relaxed">
+                  © 2026 PontoAqui.
+                </p>
+                <p className="text-[9px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-relaxed">
+                  Todos os direitos reservados.
+                </p>
+                <p className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-widest">
+                  Versão 1.0 Premium Edition
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div 
+            onClick={handleDownloadManual}
+            className="p-8 bg-blue-600 rounded-[2.5rem] shadow-xl shadow-blue-600/20 flex items-center space-x-6 text-white group cursor-pointer hover:bg-blue-500 transition-all"
+          >
+            <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center shrink-0 group-hover:rotate-12 transition-transform">
+              <Download className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Manual PDF</p>
+              <p className="text-sm font-bold">Baixar Guia Completo</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HolidaysManager() {
+  const [holidays, setHolidays] = useState([])
+  const [newHoliday, setNewHoliday] = useState({ date: '', name: '', type: 'municipal' })
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    loadHolidays()
+  }, [])
+
+  const loadHolidays = async () => {
+    const all = await db.holidays.orderBy('date').toArray()
+    setHolidays(all)
+  }
+
+  const fetchNationalHolidays = async () => {
+    setLoading(true)
+    const year = new Date().getFullYear()
+    try {
+      const response = await fetch(`https://brasilapi.com.br/api/feriados/v1/${year}`)
+      if (!response.ok) throw new Error('Falha na API')
+      const data = await response.json()
+      
+      for (const h of data) {
+        const exists = await db.holidays.where('date').equals(h.date).first()
+        if (!exists) {
+          await db.holidays.add({
+            date: h.date,
+            name: h.name,
+            type: 'national'
+          })
+        }
+      }
+      await loadHolidays()
+      alert('Feriados nacionais importados com sucesso!')
+    } catch (err) {
+      alert('Erro ao buscar feriados nacionais.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleAdd = async () => {
+    if (!newHoliday.date || !newHoliday.name) return
+    await db.holidays.add(newHoliday)
+    setNewHoliday({ date: '', name: '', type: 'municipal' })
+    await loadHolidays()
+  }
+
+  const handleDelete = async (id) => {
+    await db.holidays.delete(id)
+    await loadHolidays()
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-10 animate-in fade-in duration-500 pb-20">
+      <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+              <div className="w-2 h-6 bg-blue-600 rounded-full mr-3" />
+              Gestão de Feriados
+            </h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Configure datas com 100% de adicional</p>
+          </div>
+          <button 
+            onClick={fetchNationalHolidays}
+            disabled={loading}
+            className="px-6 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 text-[10px] uppercase tracking-widest transition-all flex items-center"
+          >
+            {loading ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Importar Feriados Nacionais {new Date().getFullYear()}
+          </button>
+        </div>
+
+        <div className="p-8 bg-slate-50 dark:bg-black/40 rounded-[2.5rem] border border-black/5 dark:border-white/5 space-y-6">
+          <p className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest">Cadastrar Feriado Local (Municipal/Estadual)</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <input type="date" className="p-4 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500" value={newHoliday.date} onChange={e => setNewHoliday({...newHoliday, date: e.target.value})} />
+            <input type="text" placeholder="Nome do Feriado" className="p-4 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500" value={newHoliday.name} onChange={e => setNewHoliday({...newHoliday, name: e.target.value})} />
+            <button onClick={handleAdd} className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:scale-[1.02] transition-all active:scale-95">Adicionar</button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-4">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Datas Cadastradas</span>
+            <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{holidays.length} feriados</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            {holidays.map(h => (
+              <div key={h.id} className="flex items-center justify-between p-6 bg-white dark:bg-slate-800/50 rounded-3xl border border-black/5 dark:border-white/5 group hover:border-blue-500/30 transition-all">
+                <div className="flex items-center space-x-6">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-[10px] ${h.type === 'national' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                    {h.type === 'national' ? 'NAC' : 'LOC'}
+                  </div>
+                  <div>
+                    <h5 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">{h.name}</h5>
+                    <p className="text-[10px] font-mono text-slate-500 font-bold">{format(new Date(h.date + 'T12:00:00'), 'dd/MM/yyyy')}</p>
+                  </div>
+                </div>
+                <button onClick={() => handleDelete(h.id)} className="p-3 text-slate-300 hover:text-red-500 transition-colors">
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
+            ))}
+            {holidays.length === 0 && (
+              <div className="text-center py-20 bg-slate-50 dark:bg-black/20 rounded-[3rem] border border-dashed border-slate-200 dark:border-white/5">
+                <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-4" />
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Nenhum feriado cadastrado</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { db, runAutoCheckout } from '../db'
 import { useNavigate } from '@tanstack/react-router'
-import { Search, User, Clock, ArrowRight, Fingerprint } from 'lucide-react'
+import { Search, User, Clock, ArrowRight, Fingerprint, ShieldCheck, Building2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -9,10 +9,12 @@ export function EmployeeSearch() {
   const [search, setSearch] = useState('')
   const [employees, setEmployees] = useState([])
   const [time, setTime] = useState(new Date())
+  const [settings, setSettings] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     runAutoCheckout()
+    db.settings.get('config').then(setSettings)
     const timer = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
@@ -20,10 +22,13 @@ export function EmployeeSearch() {
   useEffect(() => {
     const fetchEmployees = async () => {
       if (search.length > 0) {
-        const results = await db.employees
-          .where('name')
-          .startsWithIgnoreCase(search)
+        let results = await db.employees
+          .filter(e => e.name.toLowerCase().includes(search.toLowerCase()))
           .toArray()
+        
+        if (settings?.demoModeEnabled === false) {
+          results = results.filter(e => e.cpf !== '000.000.000-00')
+        }
         setEmployees(results)
       } else {
         setEmployees([])
@@ -33,21 +38,35 @@ export function EmployeeSearch() {
   }, [search])
 
   return (
-    <div className="flex flex-col items-center justify-start min-h-screen p-6 pt-12 bg-gradient-to-br from-slate-50 dark:from-slate-950 via-slate-100 dark:via-slate-900 to-blue-50 dark:to-blue-950">
-      <div className="w-full max-w-md space-y-8">
+    <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-gradient-to-br from-slate-50 dark:from-slate-950 via-slate-100 dark:via-slate-900 to-blue-50 dark:to-blue-950 transition-all duration-1000">
+      <div className="w-full max-w-md space-y-10 py-12">
         
+        {/* Company Logo Section */}
+        <div className="flex flex-col items-center justify-center animate-in fade-in slide-in-from-top-8 duration-1000 fill-mode-both">
+          {settings?.companyLogo ? (
+            <div className="w-32 h-32 mb-4 relative group">
+              <div className="absolute inset-0 bg-blue-500/20 rounded-[2.5rem] blur-2xl group-hover:blur-3xl transition-all" />
+              <img src={settings.companyLogo} alt="Logo" className="w-full h-full object-contain relative z-10" />
+            </div>
+          ) : (
+            <div className="w-24 h-24 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-black/5 dark:border-white/10 shadow-2xl flex items-center justify-center mb-6 group hover:scale-110 transition-transform duration-500">
+              <Building2 className="w-10 h-10 text-slate-300 dark:text-slate-700 group-hover:text-blue-500 transition-colors" />
+            </div>
+          )}
+        </div>
+
         {/* Real-time Clock Component */}
-        <div className="flex flex-col items-center justify-center p-6 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-[2rem] shadow-2xl backdrop-blur-xl relative overflow-hidden group animate-in slide-in-from-top-4 duration-500">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 via-emerald-500/10 to-blue-600/10 opacity-50 group-hover:opacity-100 transition-opacity duration-700" />
-          <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-1">
+        <div className="flex flex-col items-center justify-center p-8 bg-white/40 dark:bg-white/5 border border-white dark:border-white/10 rounded-[3rem] shadow-2xl backdrop-blur-2xl relative overflow-hidden group animate-in zoom-in duration-700 delay-150 fill-mode-both">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-emerald-500/5 to-blue-600/5 opacity-50 group-hover:opacity-100 transition-opacity duration-700" />
+          <p className="text-[11px] font-black text-blue-500/60 dark:text-blue-400 uppercase tracking-[0.4em] mb-2">
             {format(time, "EEEE, dd 'de' MMMM", { locale: ptBR })}
           </p>
-          <p className="text-6xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums drop-shadow-[0_0_15px_rgba(59,130,246,0.3)]">
+          <p className="text-7xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums drop-shadow-2xl">
             {format(time, 'HH:mm:ss')}
           </p>
-          <div className="absolute bottom-2 right-2 flex items-center space-x-1 opacity-40">
-            <Clock className="w-3 h-3 text-slate-900 dark:text-white" />
-            <span className="text-[8px] text-slate-900 dark:text-white uppercase tracking-widest font-bold">Ao Vivo</span>
+          <div className="absolute bottom-3 right-4 flex items-center space-x-1.5 opacity-30">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[8px] text-slate-900 dark:text-white uppercase tracking-[0.2em] font-black">Ao Vivo</span>
           </div>
         </div>
 
@@ -73,38 +92,15 @@ export function EmployeeSearch() {
 
         <div className="space-y-3">
           {employees.map((emp, idx) => (
-            <button
+            <div
               key={emp.id}
-              onClick={async () => {
-                if (emp.biometricId && window.PublicKeyCredential) {
-                  try {
-                    const assertion = await navigator.credentials.get({
-                      publicKey: {
-                        challenge: new Uint8Array(32),
-                        rpId: window.location.hostname,
-                        allowCredentials: [{
-                          type: 'public-key',
-                          id: Uint8Array.from(atob(emp.biometricId), c => c.charCodeAt(0))
-                        }],
-                        userVerification: 'required',
-                        timeout: 60000
-                      }
-                    });
-                    if (assertion) {
-                      sessionStorage.setItem('biometricVerified', emp.id);
-                      navigate({ to: `/pin/${emp.id}` });
-                      return;
-                    }
-                  } catch (err) {
-                    console.warn('Biometria falhou ou foi cancelada. Solicitando PIN.', err);
-                  }
-                }
-                navigate({ to: `/pin/${emp.id}` });
-              }}
-              className="w-full flex items-center justify-between p-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 border border-black/5 dark:border-white/5 hover:border-blue-500/50 rounded-2xl transition-all group active:scale-[0.98] animate-in slide-in-from-bottom-2"
+              className="w-full flex items-center justify-between p-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 border border-black/5 dark:border-white/5 hover:border-blue-500/50 rounded-2xl transition-all group animate-in slide-in-from-bottom-2"
               style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}
             >
-              <div className="flex items-center space-x-4">
+              <button
+                onClick={() => navigate({ to: `/pin/${emp.id}` })}
+                className="flex flex-1 items-center space-x-4 text-left"
+              >
                 <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center border border-blue-500/30 overflow-hidden shadow-inner relative">
                   {emp.photo ? (
                     <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" />
@@ -117,15 +113,60 @@ export function EmployeeSearch() {
                     </div>
                   )}
                 </div>
-                <div className="text-left">
-                  <p className="text-slate-900 dark:text-white font-bold text-lg leading-tight tracking-tight">{emp.name}</p>
-                  <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${emp.biometricId ? 'text-emerald-400' : 'text-blue-400'}`}>{emp.biometricId ? 'Biometria Ativa' : 'Acesso via PIN'}</p>
+                <div>
+                  <p className="text-slate-900 dark:text-white font-bold text-lg leading-tight tracking-tight">
+                    {emp.name}
+                    {emp.cpf === '000.000.000-00' && <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-black bg-orange-500 text-white uppercase tracking-tighter animate-pulse">Demo</span>}
+                  </p>
+                  <p className="text-[10px] uppercase font-black tracking-widest mt-0.5 text-blue-400">Tocar para entrar com PIN</p>
                 </div>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center group-hover:bg-blue-500 transition-colors">
-                {emp.biometricId ? <Fingerprint className="w-4 h-4 text-slate-500 group-hover:text-slate-900 dark:text-white transition-colors" /> : <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-slate-900 dark:text-white transition-colors" />}
-              </div>
-            </button>
+              </button>
+
+              {emp.biometricId && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (window.PublicKeyCredential) {
+                      try {
+                        const assertion = await navigator.credentials.get({
+                          publicKey: {
+                            challenge: new Uint8Array(32),
+                            rpId: window.location.hostname,
+                            allowCredentials: [{
+                              type: 'public-key',
+                              id: Uint8Array.from(atob(emp.biometricId), c => c.charCodeAt(0))
+                            }],
+                            userVerification: 'required',
+                            timeout: 60000
+                          }
+                        });
+                        if (assertion) {
+                          sessionStorage.setItem('biometricVerified', emp.id);
+                          navigate({ to: `/pin/${emp.id}` });
+                        }
+                      } catch (err) {
+                        console.warn('Biometria falhou:', err);
+                        alert('Falha na biometria. Use sua senha.');
+                      }
+                    }
+                  }}
+                  className="ml-2 w-12 h-12 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 flex flex-col items-center justify-center border border-emerald-500/20 transition-all text-emerald-500 active:scale-90"
+                  title="Entrar com Biometria"
+                >
+                  <Fingerprint className="w-5 h-5" />
+                  <span className="text-[7px] font-black uppercase mt-1">BIO</span>
+                </button>
+              )}
+
+              {!emp.biometricId && (
+                <button 
+                  onClick={() => navigate({ to: `/pin/${emp.id}` })}
+                  className="w-10 h-10 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center group-hover:bg-blue-500 transition-colors"
+                >
+                  <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-slate-900 dark:text-white transition-colors" />
+                </button>
+              )}
+            </div>
           ))}
           
           {search.length > 0 && employees.length === 0 && (
@@ -136,12 +177,13 @@ export function EmployeeSearch() {
           )}
         </div>
 
-        <div className="pt-8 text-center animate-in fade-in duration-1000 delay-500 fill-mode-both">
+        <div className="pt-12 text-center animate-in fade-in duration-1000 delay-700 fill-mode-both">
           <button 
             onClick={() => navigate({ to: '/admin' })}
-            className="text-[10px] font-black tracking-[0.2em] uppercase text-slate-600 hover:text-slate-900 dark:text-white transition-colors"
+            className="inline-flex items-center space-x-3 px-10 py-5 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[1.5rem] text-[10px] font-black tracking-[0.3em] uppercase text-slate-500 hover:text-blue-600 dark:text-slate-400 hover:dark:text-blue-400 transition-all hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 shadow-sm group"
           >
-            Acesso Administrativo
+            <ShieldCheck className="w-4 h-4 transition-transform group-hover:scale-110" />
+            <span>Acesso Administrativo</span>
           </button>
         </div>
       </div>

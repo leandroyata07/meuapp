@@ -3,10 +3,13 @@ import { format } from 'date-fns';
 
 export const db = new Dexie('PontoAquiDB');
 
-db.version(2).stores({
-  employees: '++id, name, pin, cpf',
-  records: '++id, employeeId, timestamp, type, comment',
-  settings: 'id, companyName, adminPassword'
+db.version(6).stores({
+  employees: '++id, name, pin, cpf, email, shiftStart, shiftEnd, departmentId',
+  records: '++id, employeeId, timestamp, type, comment, category, status',
+  settings: 'id, companyName, adminPassword, wifiGeofenceEnabled, allowedSSID',
+  notifications: '++id, type, message, timestamp, read, employeeId',
+  departments: '++id, name',
+  holidays: '++id, date, name, type'
 });
 
 // Initialize default settings if not present
@@ -16,12 +19,19 @@ export async function initSettings() {
     await db.settings.add({
       id: 'config',
       companyName: 'Minha Empresa',
+      companyLogo: '',
       adminPassword: 'admin', // Default password
       workingHours: '08:00 - 18:00',
       geofenceEnabled: false,
       geofenceLat: '',
       geofenceLng: '',
-      geofenceRadius: 50
+      geofenceRadius: 50,
+      googleEnabled: false,
+      oneDriveEnabled: false,
+      autoBackup: false,
+      demoModeEnabled: false,
+      lastCloudBackup: null,
+      cloudFolderId: null
     });
   }
 }

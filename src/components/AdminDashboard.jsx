@@ -132,13 +132,12 @@ export function AdminDashboard() {
     loadNotifications()
     loadData()
 
-    if (isFirebaseConfigured()) {
-      startRealtimeSync(() => {
-        loadPendingCount()
-        loadNotifications()
-        loadData()
-      })
+    const handleSync = () => {
+      loadPendingCount()
+      loadNotifications()
+      loadData()
     }
+    window.addEventListener('pontoaqui:sync', handleSync)
 
     const dataTimer = setInterval(() => {
       loadPendingCount()
@@ -153,7 +152,7 @@ export function AdminDashboard() {
     return () => {
       clearInterval(dataTimer)
       clearInterval(clockTimer)
-      stopRealtimeSync()
+      window.removeEventListener('pontoaqui:sync', handleSync)
     }
   }, [])
 

@@ -13,29 +13,45 @@ export function EmployeeSearch() {
   const [settings, setSettings] = useState(null)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    runAutoCheckout()
-    db.settings.get('config').then(setSettings)
-    const timer = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const fetchEmployees = async (query = search, currentSettings = settings) => {
+    if (query.trim().length > 0) {
+      let results = await db.employees
+        .filter(e => e.name.toLowerCase().includes(query.toLowerCase()))
+        .toArray()
+      
+      const activeSettings = currentSettings || await db.settings.get('config')
+      if (activeSettings?.demoModeEnabled === false) {
+        results = results.filter(e => e.cpf !== '000.000.000-00')
+      }
+      setEmployees(results)
+    } else {
+      setEmployees([])
+    }
+  }
 
   useEffect(() => {
-    const fetchEmployees = async () => {
-      if (search.length > 0) {
-        let results = await db.employees
-          .filter(e => e.name.toLowerCase().includes(search.toLowerCase()))
-          .toArray()
-        
-        if (settings?.demoModeEnabled === false) {
-          results = results.filter(e => e.cpf !== '000.000.000-00')
-        }
-        setEmployees(results)
-      } else {
-        setEmployees([])
-      }
+    runAutoCheckout()
+    db.settings.get('config').then(cfg => {
+      setSettings(cfg)
+    })
+    const timer = setInterval(() => setTime(new Date()), 1000)
+
+    const handleSync = () => {
+      db.settings.get('config').then(cfg => {
+        setSettings(cfg)
+        fetchEmployees(search, cfg)
+      })
     }
-    fetchEmployees()
+    window.addEventListener('pontoaqui:sync', handleSync)
+
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('pontoaqui:sync', handleSync)
+    }
+  }, [search])
+
+  useEffect(() => {
+    fetchEmployees(search, settings)
   }, [search])
 
   return (

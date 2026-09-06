@@ -14,16 +14,26 @@ import { PinEntry } from './components/PinEntry'
 import { AdminLogin } from './components/AdminLogin'
 import { AdminDashboard } from './components/AdminDashboard'
 import { ThemeToggle } from './components/ThemeToggle'
+import { startRealtimeSync, stopRealtimeSync } from './firebase'
 
-// Root Route
-const rootRoute = createRootRoute({
-  component: () => (
+function RootLayout() {
+  React.useEffect(() => {
+    startRealtimeSync()
+    return () => stopRealtimeSync()
+  }, [])
+
+  return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
     </div>
-  ),
+  )
+}
+
+// Root Route
+const rootRoute = createRootRoute({
+  component: RootLayout,
 })
 
 // Index Route (Employee Search)

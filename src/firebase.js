@@ -216,51 +216,65 @@ export function startRealtimeSync(onSyncEvent = () => {}) {
     const colRef = collection(instance.firestore, colName)
     const unsub = onSnapshot(colRef, async (snapshot) => {
       try {
-        for (const change of snapshot.docChanges()) {
-          const remoteData = change.doc.data()
-          const docId = change.doc.id
+        const firestoreIds = new Set()
 
-          if (change.type === 'removed') {
-            // Se for funcionário teste, não permitir exclusão
-            if (colName === 'employees' && (remoteData.cpf === '000.000.000-00' || remoteData.isDemo)) {
-              continue
+        for (const docSnap of snapshot.docs) {
+          const remoteData = docSnap.data()
+          const docId = docSnap.id
+          const numericId = Number(docId)
+          const targetId = isNaN(numericId) ? docId : numericId
+          firestoreIds.add(String(targetId))
+          firestoreIds.add(String(docId))
+
+          const itemToSave = {
+            ...remoteData,
+            id: targetId
+          }
+
+          // Recupera foto do cache local caso exista
+          if (colName === 'employees') {
+            const localEmp = await db.employees.get(itemToSave.id)
+            const cachedPhoto = await getLocalMedia(`employees_${itemToSave.id}_photo`)
+            itemToSave.photo = localEmp?.photo || cachedPhoto || ''
+          } else if (colName === 'records') {
+            const localRec = await db.records.get(itemToSave.id)
+            const cachedPhoto = await getLocalMedia(`records_${itemToSave.id}_photo`)
+            itemToSave.photo = localRec?.photo || cachedPhoto || null
+          } else if (colName === 'settings' && itemToSave.id === 'config') {
+            const localSettings = await db.settings.get('config')
+            const cachedLogo = await getLocalMedia('companyLogo')
+            itemToSave.companyLogo = localSettings?.companyLogo || cachedLogo || ''
+            if (itemToSave.adminPassword === 'admin') {
+              itemToSave.adminPassword = 'killer'
             }
-            if (colName === 'settings') continue
+          }
 
-            const numericId = Number(docId)
-            const targetId = isNaN(numericId) ? docId : numericId
-            await db[colName].delete(targetId)
-          } else {
-            // Added or modified
-            const numericId = Number(docId)
-            const itemToSave = {
-              ...remoteData,
-              id: isNaN(numericId) ? docId : numericId
+          await db[colName].put(itemToSave)
+        }
+
+        // Reconciliação de exclusões: se um item local não existe no Firestore, limpa da base local
+        // (preservando o funcionário de teste e o settings config)
+        if (colName === 'employees') {
+          const localItems = await db.employees.toArray()
+          for (const localItem of localItems) {
+            if (localItem.cpf === '000.000.000-00' || localItem.isDemo) continue
+            if (!firestoreIds.has(String(localItem.id))) {
+              await db.employees.delete(localItem.id)
             }
-
-            // Recupera foto do cache local caso exista
-            if (colName === 'employees') {
-              const localEmp = await db.employees.get(itemToSave.id)
-              const cachedPhoto = await getLocalMedia(`employees_${itemToSave.id}_photo`)
-              itemToSave.photo = localEmp?.photo || cachedPhoto || ''
-            } else if (colName === 'records') {
-              const localRec = await db.records.get(itemToSave.id)
-              const cachedPhoto = await getLocalMedia(`records_${itemToSave.id}_photo`)
-              itemToSave.photo = localRec?.photo || cachedPhoto || null
-            } else if (colName === 'settings' && itemToSave.id === 'config') {
-              const localSettings = await db.settings.get('config')
-              const cachedLogo = await getLocalMedia('companyLogo')
-              itemToSave.companyLogo = localSettings?.companyLogo || cachedLogo || ''
-              // Garantir que a senha admin não seja rebaixada
-              if (itemToSave.adminPassword === 'admin') {
-                itemToSave.adminPassword = 'killer'
-              }
+          }
+        } else if (colName === 'departments' || colName === 'holidays') {
+          const localItems = await db[colName].toArray()
+          for (const localItem of localItems) {
+            if (!firestoreIds.has(String(localItem.id))) {
+              await db[colName].delete(localItem.id)
             }
-
-            await db[colName].put(itemToSave)
           }
         }
+
         onSyncEvent({ type: 'sync_success', collection: colName, count: snapshot.size })
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('pontoaqui:sync', { detail: { collection: colName, count: snapshot.size } }))
+        }
       } catch (err) {
         console.warn(`[Firebase] Erro ao sincronizar coleção ${colName}:`, err)
         onSyncEvent({ type: 'sync_error', collection: colName, error: err.message })

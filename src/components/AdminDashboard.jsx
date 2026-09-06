@@ -53,8 +53,33 @@ import {
   Info,
   ExternalLink,
   BookOpen,
-  Mail
+  Mail,
+  Briefcase,
+  Timer,
+  Check,
+  Zap,
+  Scale,
+  Utensils
 } from 'lucide-react'
+import { ThemeToggle } from './ThemeToggle'
+import { 
+  SHIFT_PRESETS, 
+  DAYS_OF_WEEK, 
+  calculateNetShiftTime, 
+  checkEmployeeWorkDay, 
+  formatWorkDaysSummary 
+} from '../utils/shiftUtils'
+import {
+  getFirebaseConfig,
+  saveFirebaseConfig,
+  isFirebaseConfigured,
+  testFirebaseConnection,
+  startRealtimeSync,
+  stopRealtimeSync,
+  pushDocToFirestore,
+  deleteDocFromFirestore,
+  syncAllLocalToFirestore
+} from '../firebase'
 import { 
   BarChart, 
   Bar, 
@@ -106,6 +131,15 @@ export function AdminDashboard() {
     loadPendingCount()
     loadNotifications()
     loadData()
+
+    if (isFirebaseConfigured()) {
+      startRealtimeSync(() => {
+        loadPendingCount()
+        loadNotifications()
+        loadData()
+      })
+    }
+
     const dataTimer = setInterval(() => {
       loadPendingCount()
       loadNotifications()
@@ -119,6 +153,7 @@ export function AdminDashboard() {
     return () => {
       clearInterval(dataTimer)
       clearInterval(clockTimer)
+      stopRealtimeSync()
     }
   }, [])
 
@@ -143,11 +178,17 @@ export function AdminDashboard() {
 
   const markNotificationRead = async (id) => {
     await db.notifications.update(id, { read: true })
+    const notif = await db.notifications.get(id)
+    if (notif) await pushDocToFirestore('notifications', id, notif)
     loadNotifications()
   }
 
   const clearAllNotifications = async () => {
+    const all = await db.notifications.toArray()
     await db.notifications.clear()
+    for (const n of all) {
+      await deleteDocFromFirestore('notifications', n.id)
+    }
     loadNotifications()
   }
 
@@ -157,36 +198,42 @@ export function AdminDashboard() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden text-slate-200">
-      <header className="h-20 lg:h-24 bg-white dark:bg-slate-900 border-b border-black/5 dark:border-white/10 px-6 lg:px-10 flex items-center justify-between sticky top-0 z-[60] backdrop-blur-xl bg-white/80 dark:bg-slate-900/80">
+    <div className="flex flex-col h-screen bg-slate-50 dark:bg-[#090D16] overflow-hidden text-slate-900 dark:text-slate-100 transition-colors duration-500">
+      <header className="h-20 glass-panel border-b border-slate-200/80 dark:border-white/10 px-6 lg:px-10 flex items-center justify-between sticky top-0 z-[60]">
         <div className="flex items-center space-x-4">
           <button 
             onClick={() => setIsMenuOpen(!isMenuOpen)} 
-            className="lg:hidden p-3 bg-slate-100 dark:bg-white/5 rounded-2xl text-slate-900 dark:text-white"
+            className="lg:hidden p-2.5 bg-white/70 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl text-slate-800 dark:text-white"
           >
-            {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-          <div className="hidden lg:flex items-center space-x-3 mr-8">
-            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/20">
-              <Fingerprint className="w-7 h-7 text-white" />
+          <div className="hidden lg:flex items-center space-x-3 mr-8 cursor-pointer group" onClick={() => setActiveTab('dashboard')}>
+            <div className="w-11 h-11 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
+              <Fingerprint className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Ponto<span className="text-blue-600">Aqui</span></h1>
-              <p className="text-[9px] text-slate-400 uppercase font-black tracking-widest leading-none mt-1">Portal Administrativo</p>
+              <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">
+                Ponto<span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Aqui</span>
+              </h1>
+              <p className="text-[9px] text-slate-400 uppercase font-black tracking-widest mt-1">Portal Administrativo</p>
             </div>
           </div>
           <h1 className="lg:hidden text-lg font-black text-slate-900 dark:text-white">Admin</h1>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
+          {/* Quick Theme Toggle in Admin Header */}
+          <ThemeToggle />
+
           <div className="relative">
             <button 
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`p-3.5 transition-all rounded-2xl relative ${showNotifications ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'bg-slate-50 dark:bg-white/5 text-slate-500 hover:text-blue-600'}`}
+              className={`p-3 transition-all rounded-2xl relative border ${showNotifications ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20' : 'glass-card border-slate-200/80 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:text-blue-600'}`}
+              title="Notificações"
             >
               <Bell className="w-5 h-5" />
               {notifications.filter(n => !n.read).length > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-white dark:border-slate-900 animate-bounce">
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-white dark:border-slate-900 shadow-sm animate-pulse">
                   {notifications.filter(n => !n.read).length}
                 </span>
               )}
@@ -194,36 +241,37 @@ export function AdminDashboard() {
 
             {showNotifications && (
               <>
+                {/* Global backdrop click-outside overlay for both mobile and desktop */}
                 <div 
-                  className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-xs sm:hidden"
+                  className="fixed inset-0 z-[90] bg-black/20 sm:bg-transparent"
                   onClick={() => setShowNotifications(false)} 
                 />
-                <div className="fixed left-3 right-3 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-4 sm:w-96 max-w-lg mx-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl z-[100] p-5 sm:p-6 space-y-4 animate-in slide-in-from-top-4">
-                  <div className="flex justify-between items-center pb-4 border-b border-black/5 dark:border-white/5">
-                    <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-[0.2em]">Notificações</h3>
-                    <button onClick={clearAllNotifications} className="text-[10px] font-black text-blue-600 hover:text-red-500 uppercase tracking-widest transition-colors">Limpar Tudo</button>
+                <div className="fixed left-3 right-3 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-96 max-w-lg mx-auto glass-panel border border-slate-200/80 dark:border-white/15 rounded-3xl shadow-2xl z-[100] p-5 space-y-4 animate-in slide-in-from-top-3">
+                  <div className="flex justify-between items-center pb-3 border-b border-slate-200/60 dark:border-white/10">
+                    <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Avisos do Sistema</h3>
+                    <button onClick={clearAllNotifications} className="text-[10px] font-bold text-blue-600 hover:text-red-500 uppercase tracking-widest transition-colors">Limpar Tudo</button>
                   </div>
-                  <div className="max-h-96 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                  <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
                     {notifications.length === 0 ? (
-                      <div className="text-center py-10 opacity-50">
-                        <Bell className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                        <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Nenhum aviso no momento</p>
+                      <div className="text-center py-8 opacity-60">
+                        <Bell className="w-10 h-10 text-slate-400 mx-auto mb-2 opacity-40" />
+                        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Nenhum aviso pendente</p>
                       </div>
                     ) : (
                       notifications.map(n => (
                         <div 
                           key={n.id} 
                           onClick={() => markNotificationRead(n.id)}
-                          className={`p-4 rounded-3xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-50 dark:bg-white/5 border-transparent opacity-60' : 'bg-blue-600/5 border-blue-500/20 hover:border-blue-500/40 shadow-sm'}`}
+                          className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-100/60 dark:bg-white/5 border-transparent opacity-60' : 'bg-blue-600/5 dark:bg-blue-600/10 border-blue-500/20 hover:border-blue-500/40 shadow-xs'}`}
                         >
-                          <div className="flex justify-between items-start mb-2 gap-2">
-                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-widest shrink-0 ${
-                              n.type === 'medical' ? 'bg-purple-500/10 text-purple-600' :
-                              n.type === 'esquecimento' ? 'bg-orange-500/10 text-orange-600' :
-                              n.type === 'retroactive' ? 'bg-indigo-500/10 text-indigo-600' :
-                              n.type === 'late' ? 'bg-amber-500/10 text-amber-600' :
-                              n.type === 'geofence' ? 'bg-emerald-500/10 text-emerald-600' :
-                              'bg-blue-500/10 text-blue-600'
+                          <div className="flex justify-between items-start mb-1.5 gap-2">
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-wider shrink-0 ${
+                              n.type === 'medical' ? 'bg-purple-500/15 text-purple-600 dark:text-purple-400' :
+                              n.type === 'esquecimento' ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400' :
+                              n.type === 'retroactive' ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400' :
+                              n.type === 'late' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
+                              n.type === 'geofence' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' :
+                              'bg-blue-500/15 text-blue-600 dark:text-blue-400'
                             }`}>
                               {n.type === 'medical' ? 'Atestado' :
                                n.type === 'esquecimento' ? 'Esquecimento' :
@@ -231,9 +279,9 @@ export function AdminDashboard() {
                                n.type === 'late' ? 'Atraso' :
                                n.type === 'geofence' ? 'Localização' : 'Sistema'}
                             </span>
-                            <span className="text-[8px] text-slate-400 font-mono shrink-0">{n.timestamp ? format(new Date(n.timestamp), 'dd/MM HH:mm') : ''}</span>
+                            <span className="text-[9px] text-slate-400 font-mono shrink-0">{n.timestamp ? format(new Date(n.timestamp), 'dd/MM HH:mm') : ''}</span>
                           </div>
-                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-relaxed break-words group-hover:text-blue-600 transition-colors">{n.message}</p>
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-snug break-words group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{n.message}</p>
                         </div>
                       ))
                     )}
@@ -243,7 +291,11 @@ export function AdminDashboard() {
             )}
           </div>
 
-          <button onClick={logout} className="p-3.5 text-slate-500 dark:text-slate-400 hover:text-red-600 transition-all bg-slate-50 dark:bg-white/5 rounded-2xl hover:bg-red-50 dark:hover:bg-red-900/10">
+          <button 
+            onClick={logout} 
+            className="p-3 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-all glass-card border-slate-200/80 dark:border-white/10 rounded-2xl hover:bg-red-500/10 active:scale-95"
+            title="Sair do painel"
+          >
             <LogOut className="w-5 h-5" />
           </button>
         </div>
@@ -251,11 +303,11 @@ export function AdminDashboard() {
 
       <div className="flex-1 flex overflow-hidden relative">
         <nav className={`
-          fixed inset-0 z-50 lg:relative lg:z-0 lg:flex lg:w-80 flex-col bg-white dark:bg-slate-900 border-r border-black/5 dark:border-white/10 transition-transform duration-500 ease-in-out
+          fixed inset-0 z-50 lg:relative lg:z-0 lg:flex lg:w-72 flex-col glass-panel lg:border-r border-slate-200/80 dark:border-white/10 transition-transform duration-300 ease-in-out
           ${isMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}>
-          <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-3 mt-20 lg:mt-0">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] px-4 mb-6">Menu de Gestão</p>
+          <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-2 mt-20 lg:mt-0">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] px-3 mb-4">Menu de Gestão</p>
             {[
               { id: 'dashboard', label: 'Dashboard', icon: Activity, color: 'text-blue-500' },
               { id: 'approvals', label: 'Aprovações', icon: ShieldCheck, color: 'text-emerald-500', badge: pendingCount },
@@ -267,17 +319,14 @@ export function AdminDashboard() {
               <button 
                 key={tab.id}
                 onClick={() => { setActiveTab(tab.id); setIsMenuOpen(false); }}
-                className={`w-full flex items-center space-x-4 px-6 py-5 rounded-[2rem] transition-all duration-300 relative group ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                className={`w-full flex items-center space-x-3.5 px-4 py-3.5 rounded-2xl transition-all duration-200 relative group font-bold text-sm ${activeTab === tab.id ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-white/5'}`}
               >
-                <tab.icon className={`w-6 h-6 transition-transform group-hover:scale-110 ${activeTab === tab.id ? 'scale-110' : tab.color}`} />
-                <span className="font-black text-sm tracking-tight">{tab.label}</span>
+                <tab.icon className={`w-5 h-5 transition-transform group-hover:scale-110 ${activeTab === tab.id ? 'text-white' : tab.color}`} />
+                <span className="tracking-tight">{tab.label}</span>
                 {tab.badge > 0 && (
-                  <span className="ml-auto bg-red-600 text-white text-[10px] w-6 h-6 flex items-center justify-center rounded-full font-black shadow-lg shadow-red-600/20">
+                  <span className="ml-auto bg-red-500 text-white text-[10px] px-2 py-0.5 flex items-center justify-center rounded-full font-black shadow-xs">
                     {tab.badge}
                   </span>
-                )}
-                {activeTab === tab.id && (
-                  <div className="absolute left-0 w-1.5 h-6 bg-white rounded-full translate-x-2" />
                 )}
               </button>
             ))}
@@ -404,19 +453,19 @@ function OverviewManager() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
         {[
-          { label: 'Presentes', value: stats.present, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-          { label: 'Em Pausa', value: stats.lunch, icon: Coffee, color: 'text-orange-500', bg: 'bg-orange-500/10' },
-          { label: 'Finalizado', value: stats.finished, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-          { label: 'Ausentes', value: stats.absent, icon: UserX, color: 'text-red-500', bg: 'bg-red-500/10' }
+          { label: 'Presentes', value: stats.present, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10 border-emerald-500/20', glow: 'shadow-emerald-500/10' },
+          { label: 'Em Pausa', value: stats.lunch, icon: Coffee, color: 'text-orange-500', bg: 'bg-orange-500/10 border-orange-500/20', glow: 'shadow-orange-500/10' },
+          { label: 'Finalizado', value: stats.finished, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10 border-blue-500/20', glow: 'shadow-blue-500/10' },
+          { label: 'Ausentes', value: stats.absent, icon: UserX, color: 'text-red-500', bg: 'bg-red-500/10 border-red-500/20', glow: 'shadow-red-500/10' }
         ].map((item, i) => (
-          <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-sm border border-black/5 dark:border-white/5 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 group">
-            <div className={`w-12 h-12 ${item.bg} rounded-2xl flex items-center justify-center mb-4 group-hover:rotate-6 transition-transform`}>
+          <div key={i} className={`glass-card p-5 lg:p-6 rounded-3xl border shadow-sm hover:shadow-lg transition-all duration-300 group`}>
+            <div className={`w-12 h-12 ${item.bg} border rounded-2xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform`}>
               <item.icon className={`w-6 h-6 ${item.color}`} />
             </div>
-            <p className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">{item.label}</p>
-            <p className="text-4xl font-black text-slate-900 dark:text-white mt-2 tracking-tighter">{item.value}</p>
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{item.label}</p>
+            <p className="text-3xl lg:text-4xl font-extrabold text-slate-900 dark:text-white mt-1 font-mono tracking-tight">{item.value}</p>
           </div>
         ))}
       </div>
@@ -475,7 +524,7 @@ function EmployeeManager({ employees, departments, onDataChange }) {
   const [deptFilter, setDeptFilter] = useState('')
   const [showDeptCrud, setShowDeptCrud] = useState(false)
   const [newDeptName, setNewDeptName] = useState('')
-  const [newEmp, setNewEmp] = useState({ 
+  const defaultEmpState = { 
     name: '', 
     pin: '', 
     startDate: format(new Date(), 'yyyy-MM-dd'), 
@@ -483,15 +532,29 @@ function EmployeeManager({ employees, departments, onDataChange }) {
     email: '',
     cpf: '',
     biometricId: '',
+    workRegime: 'clt_5x2_44',
+    weeklyHours: 44,
+    workDays: [1, 2, 3, 4, 5],
     shiftStart: '08:00',
-    shiftEnd: '17:00',
+    lunchStart: '12:00',
+    lunchEnd: '13:00',
+    shiftEnd: '17:48',
+    breakMinutes: 60,
+    scaleStartDate: format(new Date(), 'yyyy-MM-dd'),
+    toleranceMin: 10,
     departmentId: '',
     allowRetroactive: false,
     retroactiveStart: '',
     retroactiveEnd: ''
-  })
+  }
+
+  const [newEmp, setNewEmp] = useState(defaultEmpState)
   const [searchTerm, setSearchTerm] = useState('')
   const [showAll, setShowAll] = useState(false)
+
+  const shiftInfo = calculateNetShiftTime(newEmp.shiftStart, newEmp.lunchStart, newEmp.lunchEnd, newEmp.shiftEnd)
+  const currentPreset = SHIFT_PRESETS.find(p => p.id === (newEmp.workRegime || 'clt_5x2_44')) || SHIFT_PRESETS[0]
+  const todayScaleStatus = checkEmployeeWorkDay(newEmp, new Date())
 
   useEffect(() => { onDataChange() }, [])
 
@@ -504,45 +567,80 @@ function EmployeeManager({ employees, departments, onDataChange }) {
       .replace(/(-\d{2})\d+?$/, '$1')
   }
 
+  const applyPreset = (preset) => {
+    setNewEmp(prev => ({
+      ...prev,
+      workRegime: preset.id,
+      weeklyHours: preset.weeklyHours,
+      workDays: [...preset.workDays],
+      shiftStart: preset.shiftStart,
+      lunchStart: preset.lunchStart,
+      lunchEnd: preset.lunchEnd,
+      shiftEnd: preset.shiftEnd,
+      breakMinutes: preset.breakMinutes,
+      scaleStartDate: prev.scaleStartDate || format(new Date(), 'yyyy-MM-dd')
+    }))
+  }
+
+  const toggleWorkDay = (dayId) => {
+    const current = Array.isArray(newEmp.workDays) ? newEmp.workDays : [1, 2, 3, 4, 5]
+    if (current.includes(dayId)) {
+      if (current.length === 1) return // manter pelo menos 1 dia
+      setNewEmp({ ...newEmp, workDays: current.filter(d => d !== dayId) })
+    } else {
+      setNewEmp({ ...newEmp, workDays: [...current, dayId].sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b)) })
+    }
+  }
+
   const handleAdd = async (e) => {
     e.preventDefault()
     if (!newEmp.name || !newEmp.pin) return
     
+    let targetId = editingId
     if (editingId) {
       await db.employees.update(editingId, newEmp)
     } else {
-      await db.employees.add(newEmp)
+      targetId = await db.employees.add(newEmp)
     }
 
-    setNewEmp({ 
-      name: '', 
-      pin: '', 
-      startDate: format(new Date(), 'yyyy-MM-dd'), 
-      photo: '', 
-      cpf: '', 
-      email: '',
-      biometricId: '',
-      shiftStart: '08:00',
-      shiftEnd: '17:00',
-      departmentId: '',
-      allowRetroactive: false,
-      retroactiveStart: '',
-      retroactiveEnd: ''
-    })
+    // Sincroniza com Firebase (as fotos ficam preservadas exclusivamente no cache local)
+    await pushDocToFirestore('employees', targetId, { ...newEmp, id: targetId })
+
+    setNewEmp(defaultEmpState)
     setShowAdd(false)
     setEditingId(null)
     onDataChange()
   }
 
   const handleEdit = (emp) => {
-    setNewEmp({ ...emp })
+    setNewEmp({
+      ...defaultEmpState,
+      ...emp,
+      workRegime: emp.workRegime || 'clt_5x2_44',
+      weeklyHours: emp.weeklyHours ?? 44,
+      workDays: Array.isArray(emp.workDays) ? emp.workDays : (emp.workRegime?.startsWith('scale_') ? [] : [1, 2, 3, 4, 5]),
+      shiftStart: emp.shiftStart || '08:00',
+      lunchStart: emp.lunchStart || '12:00',
+      lunchEnd: emp.lunchEnd || '13:00',
+      shiftEnd: emp.shiftEnd || '17:48',
+      breakMinutes: emp.breakMinutes ?? 60,
+      scaleStartDate: emp.scaleStartDate || emp.startDate || format(new Date(), 'yyyy-MM-dd'),
+      toleranceMin: emp.toleranceMin ?? 10
+    })
     setEditingId(emp.id)
     setShowAdd(true)
   }
 
   const handleDelete = async (id) => {
+    const targetEmp = employees.find(e => e.id === id)
+    if (targetEmp && (targetEmp.cpf === '000.000.000-00' || targetEmp.isDemo || targetEmp.name?.toUpperCase().includes('TESTE (DEMO)'))) {
+      alert('O perfil de teste é nativo do sistema e está protegido contra exclusão. Você pode ocultá-lo desativando o Modo Demonstração nas Configurações.')
+      return
+    }
+
     if (confirm('Deseja excluir este funcionário?')) {
       await db.employees.delete(id)
+      await deleteDocFromFirestore('employees', id)
       onDataChange()
     }
   }
@@ -588,6 +686,8 @@ function EmployeeManager({ employees, departments, onDataChange }) {
 
       const rawIdBase64 = btoa(String.fromCharCode.apply(null, new Uint8Array(credential.rawId)));
       await db.employees.update(emp.id, { biometricId: rawIdBase64 });
+      const updatedEmp = await db.employees.get(emp.id);
+      if (updatedEmp) await pushDocToFirestore('employees', emp.id, updatedEmp);
       alert('Biometria cadastrada com sucesso!');
       load();
     } catch (err) {
@@ -610,7 +710,7 @@ function EmployeeManager({ employees, departments, onDataChange }) {
           onClick={() => {
             if (showAdd && editingId) {
               setEditingId(null)
-              setNewEmp({ name: '', pin: '', startDate: format(new Date(), 'yyyy-MM-dd'), photo: '', cpf: '', email: '', departmentId: '' })
+              setNewEmp(defaultEmpState)
             }
             setShowAdd(!showAdd)
           }} 
@@ -658,19 +758,276 @@ function EmployeeManager({ employees, departments, onDataChange }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-10 border-t border-black/5 dark:border-white/5">
-            <div className="space-y-6">
-              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-1">Jornada de Trabalho</h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Entrada</label>
-                  <input type="time" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={newEmp.shiftStart} onChange={e => setNewEmp({...newEmp, shiftStart: e.target.value})} />
+          {/* SEÇÃO JORNADA, ESCALAS & TURNOS (CLT) */}
+          <div className="pt-10 border-t border-black/5 dark:border-white/5 space-y-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <h4 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
+                    Jornada, Escala & Turno de Trabalho
+                  </h4>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Saída</label>
-                  <input type="time" className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-black" value={newEmp.shiftEnd} onChange={e => setNewEmp({...newEmp, shiftEnd: e.target.value})} />
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Regimes de trabalho, horários de 4 batidas e folgas em conformidade com a legislação trabalhista vigente (CLT).
+                </p>
+              </div>
+              <span className="self-start sm:self-auto text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                {currentPreset.badge}
+              </span>
+            </div>
+
+            {/* Modelos e Escalas Prontas (Presets Legais) */}
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block flex items-center justify-between">
+                <span>Modelos de Trabalho Pré-Definidos (CLT & Legislação)</span>
+                <span className="text-slate-400 font-normal">Clique para aplicar</span>
+              </label>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {SHIFT_PRESETS.map((preset) => {
+                  const isSelected = (newEmp.workRegime || 'clt_5x2_44') === preset.id
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => applyPreset(preset)}
+                      className={`p-3.5 rounded-2xl text-left transition-all border relative flex flex-col justify-between group ${
+                        isSelected 
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xl shadow-blue-600/25 ring-2 ring-blue-500/50 scale-[1.02]' 
+                          : 'bg-slate-50 dark:bg-black/40 border-black/5 dark:border-white/5 text-slate-800 dark:text-slate-200 hover:border-blue-500/40 hover:bg-slate-100/70 dark:hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className={`text-[11px] font-black tracking-tight ${isSelected ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                            {preset.name}
+                          </span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
+                        </div>
+                        <span className={`inline-block text-[9px] font-bold px-2 py-0.5 rounded-md ${
+                          isSelected 
+                            ? 'bg-white/20 text-white' 
+                            : 'bg-slate-200/80 dark:bg-white/10 text-slate-600 dark:text-slate-400'
+                        }`}>
+                          {preset.lawRef}
+                        </span>
+                      </div>
+                      <p className={`text-[10px] mt-2 line-clamp-2 leading-relaxed ${
+                        isSelected ? 'text-white/90' : 'text-slate-500 dark:text-slate-400'
+                      }`}>
+                        {preset.description}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Configuração Específica de Escalas de Revezamento (12x36, 24x72, 4x2) */}
+            {currentPreset.isScale ? (
+              <div className="p-5 rounded-3xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-500/20 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/20 shrink-0">
+                      <Scale className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                        Escala com Ciclo de Revezamento Contínuo
+                      </h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {currentPreset.scaleType === '24x72' && 'Jornada de 24h consecutivas seguidas por 72h (3 dias inteiros) de folga ininterrupta.'}
+                        {currentPreset.scaleType === '12x36' && 'Jornada de 12h seguidas por 36h de descanso ininterrupto (Dia sim, dia não). CLT Art. 59-A.'}
+                        {currentPreset.scaleType === '4x2' && 'Jornada de 4 dias consecutivos trabalhados seguidos por 2 dias de folga contínua.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="sm:w-56">
+                    <label className="text-[9px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-widest block mb-1">
+                      Data de Início da Escala (Marco Zero)
+                    </label>
+                    <input 
+                      type="date" 
+                      className="w-full p-3 bg-white dark:bg-black/40 border border-indigo-200 dark:border-indigo-800/40 rounded-xl text-slate-900 dark:text-white text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={newEmp.scaleStartDate || format(new Date(), 'yyyy-MM-dd')}
+                      onChange={e => setNewEmp({ ...newEmp, scaleStartDate: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Live Preview do Status Hoje */}
+                <div className="pt-3 border-t border-indigo-200/50 dark:border-indigo-800/30 flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      Status no Dia de Hoje ({format(new Date(), 'dd/MM/yyyy')}):
+                    </span>
+                    <span className={`inline-flex items-center space-x-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      todayScaleStatus.type === 'work'
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full mr-1.5 ${todayScaleStatus.type === 'work' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                      {todayScaleStatus.label}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 italic">
+                    O espelho de ponto ajusta faltas e folgas automaticamente com base nesta escala.
+                  </span>
                 </div>
               </div>
+            ) : (
+              /* Seletor de Dias da Semana */
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                    Dias da Semana Trabalhados
+                  </label>
+                  <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                    {(newEmp.workDays || []).length} dia(s) configurado(s) por semana
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {DAYS_OF_WEEK.map((day) => {
+                    const isDayActive = (newEmp.workDays || []).includes(day.id)
+                    return (
+                      <button
+                        key={day.id}
+                        type="button"
+                        onClick={() => toggleWorkDay(day.id)}
+                        className={`px-4 py-3 rounded-2xl text-xs font-black transition-all flex items-center space-x-1.5 border ${
+                          isDayActive
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20'
+                            : 'bg-slate-50 dark:bg-black/40 border-black/5 dark:border-white/5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                        }`}
+                        title={day.fullName}
+                      >
+                        {isDayActive && <Check className="w-3 h-3 text-white shrink-0" />}
+                        <span>{day.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Grade de 4 Batidas: Entrada, Saída Almoço, Retorno Almoço, Saída Definitiva */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 block">
+                Horários de Turno (4 Batidas Regulamentares)
+              </label>
+              
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Entrada Principal */}
+                <div className="p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl space-y-1.5 focus-within:border-emerald-500/50 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all">
+                  <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    1. Entrada Principal
+                  </span>
+                  <input 
+                    type="time" 
+                    className="w-full bg-transparent text-slate-900 dark:text-white font-black text-lg outline-none cursor-pointer"
+                    value={newEmp.shiftStart || '08:00'} 
+                    onChange={e => setNewEmp({ ...newEmp, shiftStart: e.target.value })} 
+                  />
+                  <p className="text-[9px] text-slate-400">Início da jornada</p>
+                </div>
+
+                {/* 2. Saída Almoço */}
+                <div className="p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl space-y-1.5 focus-within:border-amber-500/50 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all">
+                  <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                    <Utensils className="w-3 h-3" />
+                    2. Saída Almoço
+                  </span>
+                  <input 
+                    type="time" 
+                    className="w-full bg-transparent text-slate-900 dark:text-white font-black text-lg outline-none cursor-pointer"
+                    value={newEmp.lunchStart || '12:00'} 
+                    onChange={e => setNewEmp({ ...newEmp, lunchStart: e.target.value })} 
+                  />
+                  <p className="text-[9px] text-slate-400">Início do almoço</p>
+                </div>
+
+                {/* 3. Retorno Almoço */}
+                <div className="p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl space-y-1.5 focus-within:border-amber-500/50 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all">
+                  <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                    <Utensils className="w-3 h-3" />
+                    3. Retorno Almoço
+                  </span>
+                  <input 
+                    type="time" 
+                    className="w-full bg-transparent text-slate-900 dark:text-white font-black text-lg outline-none cursor-pointer"
+                    value={newEmp.lunchEnd || '13:00'} 
+                    onChange={e => setNewEmp({ ...newEmp, lunchEnd: e.target.value })} 
+                  />
+                  <p className="text-[9px] text-slate-400">Retorno do almoço</p>
+                </div>
+
+                {/* 4. Saída Definitiva */}
+                <div className="p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl space-y-1.5 focus-within:border-red-500/50 focus-within:ring-2 focus-within:ring-red-500/20 transition-all">
+                  <span className="text-[9px] font-black text-red-600 dark:text-red-400 uppercase tracking-wider flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    4. Saída Definitiva
+                  </span>
+                  <input 
+                    type="time" 
+                    className="w-full bg-transparent text-slate-900 dark:text-white font-black text-lg outline-none cursor-pointer"
+                    value={newEmp.shiftEnd || '17:48'} 
+                    onChange={e => setNewEmp({ ...newEmp, shiftEnd: e.target.value })} 
+                  />
+                  <p className="text-[9px] text-slate-400">Fim do expediente</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Barra de Resumo Dinâmico da Jornada & Recomendações CLT */}
+            <div className="p-5 bg-slate-100/80 dark:bg-black/30 border border-black/5 dark:border-white/5 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-4 items-center">
+              <div>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Jornada Diária Líquida</span>
+                <span className="text-base font-black text-slate-900 dark:text-white">{shiftInfo.netText}</span>
+              </div>
+              <div>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Intervalo Almoço</span>
+                <span className="text-base font-black text-slate-900 dark:text-white">{shiftInfo.breakText}</span>
+              </div>
+              <div>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Carga Semanal (h)</span>
+                <div className="flex items-center space-x-1.5 mt-0.5">
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="60"
+                    className="w-16 p-1.5 bg-white dark:bg-black/50 border border-black/10 dark:border-white/10 rounded-lg text-sm font-black text-slate-900 dark:text-white text-center outline-none focus:ring-1 focus:ring-blue-500"
+                    value={newEmp.weeklyHours ?? 44}
+                    onChange={e => setNewEmp({ ...newEmp, weeklyHours: Number(e.target.value) })}
+                  />
+                  <span className="text-xs font-bold text-slate-500">horas</span>
+                </div>
+              </div>
+              <div>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Tolerância CLT (Art. 58)</span>
+                <div className="flex items-center space-x-1.5 mt-0.5">
+                  <input 
+                    type="number" 
+                    min="0" 
+                    max="30"
+                    className="w-16 p-1.5 bg-white dark:bg-black/50 border border-black/10 dark:border-white/10 rounded-lg text-sm font-black text-slate-900 dark:text-white text-center outline-none focus:ring-1 focus:ring-blue-500"
+                    value={newEmp.toleranceMin ?? 10}
+                    onChange={e => setNewEmp({ ...newEmp, toleranceMin: Number(e.target.value) })}
+                  />
+                  <span className="text-xs font-bold text-slate-500">min/dia</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SEÇÃO SETOR & SEGURANÇA */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pt-10 border-t border-black/5 dark:border-white/5">
+            <div className="space-y-6">
+              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-1">Lotação e Setor</h4>
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 mb-1 block">Setor / Departamento</label>
                 <div className="flex items-center space-x-2">
@@ -765,13 +1122,27 @@ function EmployeeManager({ employees, departments, onDataChange }) {
               </div>
               <div className="flex space-x-3">
                 <input type="text" placeholder="Nome do novo setor..." className="flex-1 bg-white dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-xl p-4 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={newDeptName} onChange={e => setNewDeptName(e.target.value)} />
-                <button type="button" onClick={async () => { if (!newDeptName) return; const id = await db.departments.add({ name: newDeptName }); setNewDeptName(''); setNewEmp({ ...newEmp, departmentId: String(id) }); setShowDeptCrud(false); onDataChange(); }} className="px-8 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-500 transition-colors">Adicionar</button>
+                <button type="button" onClick={async () => { 
+                  if (!newDeptName) return; 
+                  const id = await db.departments.add({ name: newDeptName }); 
+                  await pushDocToFirestore('departments', id, { id, name: newDeptName });
+                  setNewDeptName(''); 
+                  setNewEmp({ ...newEmp, departmentId: String(id) }); 
+                  setShowDeptCrud(false); 
+                  onDataChange(); 
+                }} className="px-8 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-500 transition-colors">Adicionar</button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {departments.map(d => (
                   <div key={d.id} className="flex items-center space-x-2 pl-4 pr-2 py-2 bg-white dark:bg-white/5 rounded-full border border-black/5 dark:border-white/5 group hover:border-red-500/30 transition-colors">
                     <span className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase">{d.name}</span>
-                    <button type="button" onClick={async () => confirm(`Excluir ${d.name}?`) && await db.departments.delete(d.id) && onDataChange()} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-3 h-3" /></button>
+                    <button type="button" onClick={async () => {
+                      if (confirm(`Excluir ${d.name}?`)) {
+                        await db.departments.delete(d.id);
+                        await deleteDocFromFirestore('departments', d.id);
+                        onDataChange();
+                      }
+                    }} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-3 h-3" /></button>
                   </div>
                 ))}
               </div>
@@ -810,43 +1181,106 @@ function EmployeeManager({ employees, departments, onDataChange }) {
               {employees
                 .filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()))
                 .filter(e => !deptFilter || String(e.departmentId) === String(deptFilter))
-                .map(emp => (
-                  <div key={emp.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-black/5 dark:border-white/5 hover:border-blue-500/40 transition-all duration-500 group shadow-sm hover:shadow-2xl relative overflow-hidden flex flex-col">
-                    <div className="flex items-start justify-between mb-6">
-                      <div className="w-20 h-20 rounded-3xl bg-slate-100 dark:bg-black/40 border border-black/5 dark:border-white/5 overflow-hidden shadow-inner group-hover:scale-105 transition-transform duration-500 shrink-0">
-                        {emp.photo ? <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" /> : <Users className="w-8 h-8 text-slate-300 mx-auto mt-6" />}
+                .map(emp => {
+                  const empPreset = SHIFT_PRESETS.find(p => p.id === emp.workRegime) || SHIFT_PRESETS[0]
+                  const empDayStatus = checkEmployeeWorkDay(emp, new Date())
+                  const empNetTime = calculateNetShiftTime(emp.shiftStart || '08:00', emp.lunchStart || '12:00', emp.lunchEnd || '13:00', emp.shiftEnd || '17:00')
+                  const workDaysSummary = formatWorkDaysSummary(emp)
+
+                  return (
+                    <div key={emp.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-black/5 dark:border-white/5 hover:border-blue-500/40 transition-all duration-500 group shadow-sm hover:shadow-2xl relative overflow-hidden flex flex-col">
+                      <div className="flex items-start justify-between mb-6">
+                        <div className="w-20 h-20 rounded-3xl bg-slate-100 dark:bg-black/40 border border-black/5 dark:border-white/5 overflow-hidden shadow-inner group-hover:scale-105 transition-transform duration-500 shrink-0">
+                          {emp.photo ? <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" /> : <Users className="w-8 h-8 text-slate-300 mx-auto mt-6" />}
+                        </div>
+                        <div className="flex flex-col items-end gap-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-600/10 px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm">ID: {emp.id}</span>
+                            <span className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-full uppercase tracking-wider border border-indigo-500/20">
+                              {empPreset.badge}
+                            </span>
+                          </div>
+                          {emp.departmentId && (
+                            <span className="text-[9px] font-black text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5 px-3 py-1.5 rounded-full uppercase tracking-widest border border-black/5 dark:border-white/5">
+                              {departments.find(d => String(d.id) === String(emp.departmentId))?.name}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-600/10 px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm">ID: {emp.id}</span>
-                        {emp.departmentId && (
-                          <span className="text-[9px] font-black text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/5 px-3 py-1.5 rounded-full uppercase tracking-widest border border-black/5 dark:border-white/5">
-                            {departments.find(d => String(d.id) === String(emp.departmentId))?.name}
-                          </span>
+                      
+                      <div className="flex-1 min-w-0 mb-6">
+                        <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight truncate group-hover:text-blue-600 transition-colors">{emp.name}</h3>
+                        
+                        <div className="flex items-center space-x-2 mt-2">
+                          <ShieldAlert className="w-3 h-3 text-slate-400" />
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Acesso PIN: <span className="text-slate-900 dark:text-white">{emp.pin}</span></span>
+                        </div>
+
+                        {/* Bloco de Jornada e Turno */}
+                        <div className="mt-4 p-3 bg-slate-50 dark:bg-black/40 rounded-2xl border border-black/5 dark:border-white/5 space-y-1.5 text-[11px]">
+                          <div className="flex items-center justify-between text-slate-700 dark:text-slate-300 font-bold">
+                            <span className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              <span>{emp.shiftStart || '08:00'} - {emp.shiftEnd || '17:00'}</span>
+                            </span>
+                            <span className="text-[10px] font-black text-slate-400">
+                              {empNetTime.netText}/dia
+                            </span>
+                          </div>
+
+                          {emp.lunchStart && emp.lunchEnd && (
+                            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-[10px]">
+                              <span className="flex items-center gap-1.5">
+                                <Utensils className="w-3 h-3 text-amber-500 shrink-0" />
+                                <span>Almoço: {emp.lunchStart} às {emp.lunchEnd}</span>
+                              </span>
+                              <span className="font-semibold">({empNetTime.breakText})</span>
+                            </div>
+                          )}
+
+                          <div className="pt-1.5 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                            {empPreset.isScale ? (
+                              <div className="flex items-center space-x-1.5">
+                                <span className={`w-2 h-2 rounded-full ${empDayStatus.type === 'work' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                <span className={`text-[9px] font-black uppercase tracking-wider ${
+                                  empDayStatus.type === 'work' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+                                }`}>
+                                  Hoje: {empDayStatus.shortLabel || empDayStatus.label}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 truncate">
+                                Dias: <span className="font-bold text-slate-700 dark:text-slate-300">{workDaysSummary}</span>
+                              </span>
+                            )}
+                            <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
+                              {emp.weeklyHours ?? 44}h/sem
+                            </span>
+                          </div>
+                        </div>
+
+                        {emp.allowRetroactive && emp.retroactiveStart && emp.retroactiveEnd && (
+                          <div className="mt-3 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center space-x-2 text-indigo-600 dark:text-indigo-400 text-[9px] font-black uppercase tracking-wider">
+                            <Calendar className="w-3 h-3 shrink-0" />
+                            <span>Retroativo: {format(new Date(emp.retroactiveStart + 'T12:00:00'), 'dd/MM')} a {format(new Date(emp.retroactiveEnd + 'T12:00:00'), 'dd/MM')}</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center gap-2 pt-6 border-t border-black/5 dark:border-white/5 mt-auto">
+                        <button onClick={() => handleEdit(emp)} className="flex-1 py-3.5 bg-blue-600/5 hover:bg-blue-600 text-blue-600 hover:text-white rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2"><Edit className="w-3 h-3" /><span>Editar</span></button>
+                        <button onClick={() => registerBiometrics(emp)} className={`p-3.5 rounded-2xl transition-all ${emp.biometricId ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-50 dark:bg-white/5 text-slate-400 hover:bg-blue-600 hover:text-white'}`} title="Configurar Biometria"><Fingerprint className="w-4 h-4" /></button>
+                        {emp.cpf === '000.000.000-00' || emp.isDemo ? (
+                          <div className="p-3.5 bg-slate-100 dark:bg-white/5 text-slate-400 rounded-2xl cursor-not-allowed flex items-center justify-center" title="Perfil de Teste Protegido (não pode ser excluído)">
+                            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                          </div>
+                        ) : (
+                          <button onClick={() => handleDelete(emp.id)} className="p-3.5 bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl transition-all" title="Remover"><Trash2 className="w-4 h-4" /></button>
                         )}
                       </div>
                     </div>
-                    
-                    <div className="flex-1 min-w-0 mb-8">
-                      <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight truncate group-hover:text-blue-600 transition-colors">{emp.name}</h3>
-                      <div className="flex items-center space-x-2 mt-2">
-                        <ShieldAlert className="w-3 h-3 text-slate-400" />
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Acesso PIN: <span className="text-slate-900 dark:text-white">{emp.pin}</span></span>
-                      </div>
-                      {emp.allowRetroactive && emp.retroactiveStart && emp.retroactiveEnd && (
-                        <div className="mt-3 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center space-x-2 text-indigo-600 dark:text-indigo-400 text-[9px] font-black uppercase tracking-wider">
-                          <Calendar className="w-3 h-3 shrink-0" />
-                          <span>Retroativo: {format(new Date(emp.retroactiveStart + 'T12:00:00'), 'dd/MM')} a {format(new Date(emp.retroactiveEnd + 'T12:00:00'), 'dd/MM')}</span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex items-center gap-2 pt-6 border-t border-black/5 dark:border-white/5">
-                      <button onClick={() => handleEdit(emp)} className="flex-1 py-3.5 bg-blue-600/5 hover:bg-blue-600 text-blue-600 hover:text-white rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center space-x-2"><Edit className="w-3 h-3" /><span>Editar</span></button>
-                      <button onClick={() => registerBiometrics(emp)} className={`p-3.5 rounded-2xl transition-all ${emp.biometricId ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-50 dark:bg-white/5 text-slate-400 hover:bg-blue-600 hover:text-white'}`} title="Configurar Biometria"><Fingerprint className="w-4 h-4" /></button>
-                      <button onClick={() => handleDelete(emp.id)} className="p-3.5 bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white rounded-2xl transition-all" title="Remover"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
             </div>
           )}
         </div>
@@ -997,17 +1431,15 @@ function ReportsManager({ employees, departments, onDataChange }) {
       let totalWorkedMin = 0
       
       const holidays = await db.holidays.toArray()
-      const [shStart, smStart] = (emp?.shiftStart || '08:00').split(':').map(Number)
-      const [shEnd, smEnd] = (emp?.shiftEnd || '17:00').split(':').map(Number)
-      const dailyExpectedMin = (shEnd * 60 + smEnd) - (shStart * 60 + smStart) - 60 // Assumes 1h lunch
+      const netShift = calculateNetShiftTime(emp?.shiftStart || '08:00', emp?.lunchStart || '12:00', emp?.lunchEnd || '13:00', emp?.shiftEnd || '17:00')
+      const dailyExpectedMin = netShift.dailyMin || 480
 
       for (let i = 1; i <= daysInMonth; i++) {
         const d = new Date(monthDate.getFullYear(), monthDate.getMonth(), i)
         const dateISO = format(d, 'yyyy-MM-dd')
         const holiday = holidays.find(h => h.date === dateISO)
-        const isSunday = d.getDay() === 0
-        const isSaturday = d.getDay() === 6
-        const isWeekend = isSunday || isSaturday
+        const workDayStatus = checkEmployeeWorkDay(emp, d)
+        const isWorkDay = workDayStatus.isWorkDay && !holiday
         const dayStr = `${i.toString().padStart(2, '0')}/${format(monthDate, 'MM/yyyy')}`
         
         dailyData[dayStr] = {
@@ -1018,18 +1450,16 @@ function ReportsManager({ employees, departments, onDataChange }) {
           extras: [],
           obs: [],
           workedMin: 0,
-          expectedMin: (isWeekend || holiday) ? 0 : dailyExpectedMin,
+          expectedMin: isWorkDay ? dailyExpectedMin : 0,
           isHoliday: !!holiday,
           holidayName: holiday?.name || '',
-          isSunday,
-          isSaturday
+          isWorkDay
         }
         
         if (holiday) dailyData[dayStr].obs.push(`FERIADO: ${holiday.name.toUpperCase()}`)
-        else if (isSunday) dailyData[dayStr].obs.push('DOMINGO')
-        else if (isSaturday) dailyData[dayStr].obs.push('SÁBADO')
+        else if (!workDayStatus.isWorkDay) dailyData[dayStr].obs.push(workDayStatus.label.toUpperCase())
 
-        if (!isWeekend && !holiday) totalExpectedMin += dailyExpectedMin
+        if (isWorkDay) totalExpectedMin += dailyExpectedMin
       }
 
       records.filter(r => r.status !== 'rejected').forEach(r => {
@@ -1214,6 +1644,10 @@ function ReportsManager({ employees, departments, onDataChange }) {
     }
 
     await db.records.bulkAdd(newRecords)
+    for (const r of newRecords) {
+      const docId = String(r.id || `${r.employeeId}_${new Date(r.timestamp).getTime()}`)
+      await pushDocToFirestore('records', docId, r)
+    }
     setShowManualEntry(false)
     setManualEntryData({...manualEntryData, comment: ''})
     loadRecords()
@@ -1235,15 +1669,19 @@ function ReportsManager({ employees, departments, onDataChange }) {
       type: 'superseded',
       comment: `Original: ${format(new Date(original.timestamp), 'HH:mm')} | Ajustado por admin.`
     })
+    const updatedOrig = await db.records.get(original.id)
+    if (updatedOrig) await pushDocToFirestore('records', original.id, updatedOrig)
 
     // 2. Create new adjustment record
-    await db.records.add({
+    const newRecId = await db.records.add({
       employeeId: original.employeeId,
       timestamp: newTimestamp,
       type: 'admin_adjustment',
       comment: `AJUSTE: ${adjustmentData.reason} (Original era ${format(new Date(original.timestamp), 'HH:mm')})`,
       status: 'approved'
     })
+    const createdRec = await db.records.get(newRecId)
+    if (createdRec) await pushDocToFirestore('records', newRecId, createdRec)
 
     setAdjustmentData({ record: null, newTime: '', reason: '' })
     loadRecords()
@@ -1664,6 +2102,124 @@ function SettingsManager() {
   const [previewRecords, setPreviewRecords] = useState([])
   const [confirmModal, setConfirmModal] = useState({ show: false, password: '' })
   const [isDemoLoading, setIsDemoLoading] = useState(false)
+
+  // Firebase Realtime Config States
+  const [fbConfig, setFbConfig] = useState(() => getFirebaseConfig() || {
+    apiKey: '',
+    authDomain: '',
+    projectId: '',
+    storageBucket: '',
+    messagingSenderId: '',
+    appId: ''
+  })
+  const [fbRawInput, setFbRawInput] = useState('')
+  const [fbStatus, setFbStatus] = useState({
+    testing: false,
+    msg: '',
+    isConfigured: isFirebaseConfigured(),
+    success: null
+  })
+  const [syncingAll, setSyncingAll] = useState(false)
+
+  const parseRawFirebaseConfig = (text) => {
+    if (!text) return null
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed.apiKey && parsed.projectId) return parsed
+    } catch (e) {}
+
+    const extract = (key) => {
+      const match = text.match(new RegExp(`${key}["']?\\s*:\\s*["']([^"']+)["']`))
+      return match ? match[1] : ''
+    }
+
+    const apiKey = extract('apiKey')
+    const projectId = extract('projectId')
+    if (!apiKey && !projectId) return null
+
+    return {
+      apiKey: apiKey || '',
+      authDomain: extract('authDomain') || '',
+      projectId: projectId || '',
+      storageBucket: extract('storageBucket') || '',
+      messagingSenderId: extract('messagingSenderId') || '',
+      appId: extract('appId') || ''
+    }
+  }
+
+  const handleApplyRawConfig = () => {
+    if (!fbRawInput.trim()) return
+    const parsed = parseRawFirebaseConfig(fbRawInput)
+    if (parsed) {
+      setFbConfig(parsed)
+      alert('Credenciais extraídas com sucesso! Clique em "Salvar e Iniciar Sincronização" para ativar.')
+    } else {
+      alert('Não foi possível extrair os dados. Verifique se copiou o código ou JSON do Firebase Console.')
+    }
+  }
+
+  const handleTestFirebase = async () => {
+    setFbStatus({ testing: true, msg: 'Testando conexão com o Firestore...', success: null, isConfigured: fbStatus.isConfigured })
+    const res = await testFirebaseConnection(fbConfig)
+    setFbStatus({
+      testing: false,
+      msg: res.message,
+      success: res.success,
+      isConfigured: res.success ? true : fbStatus.isConfigured
+    })
+  }
+
+  const handleSaveFirebase = async () => {
+    if (!fbConfig.apiKey || !fbConfig.projectId) {
+      alert('Preencha ao menos a apiKey e o projectId do Firebase.')
+      return
+    }
+    setFbStatus({ testing: true, msg: 'Validando credenciais e iniciando sincronização...', success: null, isConfigured: fbStatus.isConfigured })
+    const testRes = await testFirebaseConnection(fbConfig)
+    if (!testRes.success) {
+      setFbStatus({ testing: false, msg: `Falha ao conectar: ${testRes.message}`, success: false, isConfigured: false })
+      alert(`Não foi possível salvar: ${testRes.message}`)
+      return
+    }
+    saveFirebaseConfig(fbConfig)
+    startRealtimeSync(() => {
+      db.employees.toArray().then(setEmployees)
+      updateStats()
+    })
+    setFbStatus({ testing: false, msg: 'Firebase Firestore conectado e sincronização bidirecional ativa!', success: true, isConfigured: true })
+    alert('Configurações salvas com sucesso! O PontoAqui agora está sincronizando em tempo real com o Firebase Firestore.')
+  }
+
+  const handleDisconnectFirebase = () => {
+    if (confirm('Deseja realmente desconectar o Firebase deste dispositivo? O sistema continuará operando no modo local.')) {
+      saveFirebaseConfig(null)
+      stopRealtimeSync()
+      setFbConfig({ apiKey: '', authDomain: '', projectId: '', storageBucket: '', messagingSenderId: '', appId: '' })
+      setFbRawInput('')
+      setFbStatus({ testing: false, msg: 'Firebase desconectado.', success: null, isConfigured: false })
+      alert('Firebase desconectado com sucesso.')
+    }
+  }
+
+  const handleExportAllToFirebase = async () => {
+    if (!isFirebaseConfigured()) {
+      alert('Por favor, configure e salve as credenciais do Firebase antes de sincronizar a base local.')
+      return
+    }
+    if (!confirm('Deseja exportar todos os dados deste dispositivo para o Firebase Firestore? (Nota: Fotos e logo permanecem estritamente em cache local deste dispositivo)')) {
+      return
+    }
+    setSyncingAll(true)
+    try {
+      const res = await syncAllLocalToFirestore()
+      alert(`Sincronização concluída com sucesso! ${res.count} documentos locais enviados para o Firebase Firestore.`)
+    } catch (err) {
+      console.error(err)
+      alert(`Erro ao sincronizar base local: ${err.message}`)
+    } finally {
+      setSyncingAll(false)
+    }
+  }
   
   const [delFilter, setDelFilter] = useState({
     employeeId: '',
@@ -1688,7 +2244,17 @@ function SettingsManager() {
       // Activate: Create Test Employee if not exists
       const testEmp = employees.find(e => e.cpf === '000.000.000-00')
       if (!testEmp) {
-        await db.employees.add({
+        const testEmpId = await db.employees.add({
+          name: 'TESTE (DEMO) - FUNCIONÁRIO',
+          pin: '0000',
+          cpf: '000.000.000-00',
+          email: 'teste@exemplo.com',
+          shiftStart: '08:00',
+          shiftEnd: '17:00',
+          photo: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'
+        })
+        await pushDocToFirestore('employees', testEmpId, {
+          id: testEmpId,
           name: 'TESTE (DEMO) - FUNCIONÁRIO',
           pin: '0000',
           cpf: '000.000.000-00',
@@ -1706,6 +2272,7 @@ function SettingsManager() {
 
     const updatedSettings = { ...settings, demoModeEnabled: newStatus }
     await db.settings.put(updatedSettings)
+    await pushDocToFirestore('settings', 'config', updatedSettings)
     setSettings(updatedSettings)
     updateStats()
     db.employees.toArray().then(setEmployees)
@@ -1776,9 +2343,24 @@ function SettingsManager() {
   }
 
   const runDeletion = async () => {
-    if (confirmModal.password !== settings.adminPassword) { alert('Senha incorreta!'); return }
+    const adminPass = settings.adminPassword || 'killer'
+    if (confirmModal.password !== adminPass) { alert('Senha incorreta!'); return }
+
+    if (delFilter.scope === 'employee' && delFilter.employeeId) {
+      const targetEmp = employees.find(e => e.id === Number(delFilter.employeeId))
+      if (targetEmp && (targetEmp.cpf === '000.000.000-00' || targetEmp.isDemo || targetEmp.name?.toUpperCase().includes('TESTE (DEMO)'))) {
+        alert('O perfil de teste é nativo do sistema e está protegido contra exclusão.')
+        return
+      }
+      await db.employees.delete(Number(delFilter.employeeId))
+      await deleteDocFromFirestore('employees', delFilter.employeeId)
+    }
+
     await db.records.bulkDelete(previewRecords.map(r => r.id))
-    if (delFilter.scope === 'employee' && delFilter.employeeId) await db.employees.delete(Number(delFilter.employeeId))
+    for (const r of previewRecords) {
+      await deleteDocFromFirestore('records', r.id)
+    }
+
     alert('Operação concluída!'); window.location.reload()
   }
 
@@ -1794,21 +2376,70 @@ function SettingsManager() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 p-1.5 bg-white dark:bg-slate-900 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm overflow-x-auto">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap gap-2.5 p-2 glass-panel rounded-[2rem] border border-slate-200/80 dark:border-white/10 shadow-sm">
         {[
-          { id: 'general', label: 'Geral', icon: Settings },
-          { id: 'security', label: 'Segurança', icon: ShieldCheck },
-          { id: 'holidays', label: 'Feriados', icon: Calendar },
-          { id: 'data', label: 'Dados', icon: Database },
-          { id: 'cloud', label: 'Nuvem', icon: Cloud }
+          { 
+            id: 'general', 
+            label: 'Geral', 
+            icon: Settings, 
+            activeBg: 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-600/30 text-white',
+            border: 'border-blue-500/30 hover:border-blue-500/70',
+            activeBorder: 'border-blue-400',
+            inactiveColor: 'text-blue-500',
+            inactiveBg: 'hover:bg-blue-500/10'
+          },
+          { 
+            id: 'security', 
+            label: 'Segurança', 
+            icon: ShieldCheck, 
+            activeBg: 'bg-gradient-to-r from-emerald-600 to-teal-600 shadow-emerald-600/30 text-white',
+            border: 'border-emerald-500/30 hover:border-emerald-500/70',
+            activeBorder: 'border-emerald-400',
+            inactiveColor: 'text-emerald-500',
+            inactiveBg: 'hover:bg-emerald-500/10'
+          },
+          { 
+            id: 'holidays', 
+            label: 'Feriados', 
+            icon: Calendar, 
+            activeBg: 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-purple-600/30 text-white',
+            border: 'border-purple-500/30 hover:border-purple-500/70',
+            activeBorder: 'border-purple-400',
+            inactiveColor: 'text-purple-500',
+            inactiveBg: 'hover:bg-purple-500/10'
+          },
+          { 
+            id: 'data', 
+            label: 'Dados', 
+            icon: Database, 
+            activeBg: 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/30 text-white',
+            border: 'border-amber-500/30 hover:border-amber-500/70',
+            activeBorder: 'border-amber-400',
+            inactiveColor: 'text-amber-500',
+            inactiveBg: 'hover:bg-amber-500/10'
+          },
+          { 
+            id: 'cloud', 
+            label: 'Nuvem', 
+            icon: Cloud, 
+            activeBg: 'bg-gradient-to-r from-sky-500 to-cyan-600 shadow-sky-500/30 text-white',
+            border: 'border-sky-500/30 hover:border-sky-500/70',
+            activeBorder: 'border-sky-400',
+            inactiveColor: 'text-sky-500',
+            inactiveBg: 'hover:bg-sky-500/10'
+          }
         ].map(tab => (
           <button 
             key={tab.id} 
             onClick={() => setActiveSubTab(tab.id)} 
-            className={`flex items-center space-x-2 px-8 py-4 rounded-2xl transition-all whitespace-nowrap ${activeSubTab === tab.id ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+            className={`flex items-center justify-center space-x-2.5 px-6 py-3.5 rounded-2xl border-2 transition-all font-bold text-xs uppercase tracking-wider text-center lg:min-w-[150px] flex-1 sm:flex-initial active:scale-95 group ${
+              activeSubTab === tab.id 
+                ? `${tab.activeBg} ${tab.activeBorder} shadow-lg` 
+                : `${tab.border} ${tab.inactiveBg} text-slate-700 dark:text-slate-300 bg-white/40 dark:bg-white/5`
+            }`}
           >
-            <tab.icon className="w-4 h-4" />
-            <span className="text-[10px] font-black uppercase tracking-widest">{tab.label}</span>
+            <tab.icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${activeSubTab === tab.id ? 'text-white' : tab.inactiveColor}`} />
+            <span className="truncate">{tab.label}</span>
           </button>
         ))}
       </div>
@@ -1911,7 +2542,7 @@ function SettingsManager() {
               </div>
             </div>
 
-            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Alterações</button>
+            <button onClick={async () => { const cfg = {...settings, id: 'config'}; await db.settings.put(cfg); await pushDocToFirestore('settings', 'config', cfg); alert('Configurações Salvas!') }} className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Alterações</button>
           </div>
 
           <div className="space-y-6">
@@ -1999,7 +2630,7 @@ function SettingsManager() {
               </div>
             )}
 
-            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Segurança</button>
+            <button onClick={async () => { const cfg = {...settings, id: 'config'}; await db.settings.put(cfg); await pushDocToFirestore('settings', 'config', cfg); alert('Configurações Salvas!') }} className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Segurança</button>
           </div>
         </div>
       )}
@@ -2056,64 +2687,241 @@ function SettingsManager() {
       {activeSubTab === 'holidays' && <HolidaysManager />}
       {activeSubTab === 'cloud' && (
         <div className="max-w-4xl mx-auto space-y-10 animate-in fade-in duration-500">
-          <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-10">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
-                <Cloud className="w-6 h-6 mr-3 text-blue-500" />
-                Sincronização em Nuvem
-              </h3>
-              <button 
-                onClick={() => setSettings({...settings, autoBackup: !settings.autoBackup})}
-                className={`w-16 h-8 rounded-full transition-all relative shadow-inner ${settings.autoBackup ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-800'}`}
+          {/* Header & Status Card */}
+          <div className="bg-white dark:bg-slate-900 p-8 lg:p-12 rounded-[3rem] border border-black/5 dark:border-white/10 shadow-sm space-y-8">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-black/5 dark:border-white/5">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center font-black">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                      Firebase Firestore em Tempo Real
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                      Sincronização bidirecional em tempo real de registros, colaboradores, setores e feriados.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2 shrink-0">
+                {fbStatus.isConfigured ? (
+                  <span className="inline-flex items-center px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 shadow-sm">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse mr-2" />
+                    Tempo Real Ativo
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 mr-2" />
+                    Modo Local Offline
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Architecture Guarantees Pills */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-5 rounded-2xl bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20 space-y-2">
+                <div className="flex items-center space-x-2 text-blue-500 font-black text-xs uppercase tracking-wide">
+                  <Zap className="w-4 h-4 shrink-0" />
+                  <span>Nuvem em Tempo Real</span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Batidas de ponto e cadastros sincronizam instantaneamente entre todos os dispositivos.
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 space-y-2">
+                <div className="flex items-center space-x-2 text-purple-500 font-black text-xs uppercase tracking-wide">
+                  <Camera className="w-4 h-4 shrink-0" />
+                  <span>Fotos em Cache Local</span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Fotos e logomarca ficam salvas estritamente no cache local deste dispositivo, economizando cota.
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 space-y-2">
+                <div className="flex items-center space-x-2 text-emerald-500 font-black text-xs uppercase tracking-wide">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>Perfis Protegidos</span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Administrador (senha: killer) e Perfil de Teste têm garantia permanente contra exclusão.
+                </p>
+              </div>
+            </div>
+
+            {/* Quick snippet importer */}
+            <div className="p-6 bg-slate-50 dark:bg-black/40 rounded-2xl border border-black/5 dark:border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                  Colar Código / JSON do Firebase Console
+                </label>
+                <span className="text-[10px] text-blue-500 font-bold">Detecção Automática</span>
+              </div>
+              <textarea
+                rows={3}
+                value={fbRawInput}
+                onChange={e => setFbRawInput(e.target.value)}
+                placeholder='Cole aqui o trecho do Firebase Console: const firebaseConfig = { apiKey: "...", projectId: "..." };'
+                className="w-full p-3 font-mono text-xs bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 dark:text-slate-200"
+              />
+              <button
+                type="button"
+                onClick={handleApplyRawConfig}
+                className="px-6 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-black font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition-all flex items-center space-x-2 active:scale-95"
               >
-                <div className={`w-6 h-6 bg-white rounded-full absolute top-1 transition-all shadow-md ${settings.autoBackup ? 'left-9' : 'left-1'}`} />
+                <Zap className="w-3.5 h-3.5" />
+                <span>Preencher Campos Automaticamente</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className={`p-8 rounded-[2.5rem] border transition-all space-y-6 ${settings.googleEnabled ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-50 dark:bg-black/40 border-black/5 dark:border-white/5'}`}>
-                <img src="https://www.google.com/favicon.ico" className="w-8 h-8" alt="Google" />
-                <div>
-                  <h4 className="text-slate-900 dark:text-white font-black text-sm uppercase tracking-tight">Google Drive</h4>
-                  <p className="text-xs text-slate-500 mt-1">Backup automático via conta Google.</p>
+            {/* Explicit config inputs */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                Parâmetros do Projeto
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">API Key *</label>
+                  <input
+                    type="text"
+                    value={fbConfig.apiKey || ''}
+                    onChange={e => setFbConfig({ ...fbConfig, apiKey: e.target.value })}
+                    placeholder="AIzaSy..."
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
-                <button 
-                  onClick={() => setSettings({...settings, googleEnabled: !settings.googleEnabled})}
-                  className={`w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all ${settings.googleEnabled ? 'bg-red-500/10 text-red-500' : 'bg-blue-600 text-white shadow-lg'}`}
-                >
-                  {settings.googleEnabled ? 'Desconectar' : 'Conectar Drive'}
-                </button>
-              </div>
 
-              <div className={`p-8 rounded-[2.5rem] border transition-all space-y-6 ${settings.oneDriveEnabled ? 'bg-blue-500/5 border-blue-500/20' : 'bg-slate-50 dark:bg-black/40 border-black/5 dark:border-white/5'}`}>
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-[8px]">MS</div>
-                <div>
-                  <h4 className="text-slate-900 dark:text-white font-black text-sm uppercase tracking-tight">OneDrive</h4>
-                  <p className="text-xs text-slate-500 mt-1">Sincronização via conta Microsoft.</p>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">Project ID *</label>
+                  <input
+                    type="text"
+                    value={fbConfig.projectId || ''}
+                    onChange={e => setFbConfig({ ...fbConfig, projectId: e.target.value })}
+                    placeholder="meu-ponto-aqui"
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
-                <button 
-                  onClick={() => setSettings({...settings, oneDriveEnabled: !settings.oneDriveEnabled})}
-                  className={`w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all ${settings.oneDriveEnabled ? 'bg-red-500/10 text-red-500' : 'bg-blue-600 text-white shadow-lg'}`}
-                >
-                  {settings.oneDriveEnabled ? 'Desconectar' : 'Conectar OneDrive'}
-                </button>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">Auth Domain</label>
+                  <input
+                    type="text"
+                    value={fbConfig.authDomain || ''}
+                    onChange={e => setFbConfig({ ...fbConfig, authDomain: e.target.value })}
+                    placeholder="meu-ponto-aqui.firebaseapp.com"
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">Storage Bucket</label>
+                  <input
+                    type="text"
+                    value={fbConfig.storageBucket || ''}
+                    onChange={e => setFbConfig({ ...fbConfig, storageBucket: e.target.value })}
+                    placeholder="meu-ponto-aqui.appspot.com"
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">Messaging Sender ID</label>
+                  <input
+                    type="text"
+                    value={fbConfig.messagingSenderId || ''}
+                    onChange={e => setFbConfig({ ...fbConfig, messagingSenderId: e.target.value })}
+                    placeholder="1234567890"
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider ml-1">App ID</label>
+                  <input
+                    type="text"
+                    value={fbConfig.appId || ''}
+                    onChange={e => setFbConfig({ ...fbConfig, appId: e.target.value })}
+                    placeholder="1:1234567890:web:abcdef"
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               </div>
             </div>
 
-            {(settings.googleEnabled || settings.oneDriveEnabled) && (
-              <div className="p-8 bg-blue-600 rounded-[2.5rem] text-white flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl shadow-blue-600/30">
-                <div className="flex items-center space-x-4">
-                  <RefreshCw className="w-8 h-8 animate-spin-slow" />
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Última Sincronização</p>
-                    <p className="text-lg font-bold">{settings.lastCloudBackup ? format(new Date(settings.lastCloudBackup), "dd/MM/yyyy 'às' HH:mm") : 'Nunca realizado'}</p>
-                  </div>
-                </div>
-                <button className="px-8 py-4 bg-white text-blue-600 font-black rounded-2xl uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all shadow-lg">Sincronizar Agora</button>
+            {/* Status Message Box */}
+            {fbStatus.msg && (
+              <div className={`p-4 rounded-2xl flex items-center space-x-3 text-xs font-bold ${
+                fbStatus.success === true 
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
+                  : fbStatus.success === false
+                  ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'
+                  : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+              }`}>
+                {fbStatus.testing ? (
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
+                ) : fbStatus.success === true ? (
+                  <CheckCircle2 className="w-5 h-5 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 shrink-0" />
+                )}
+                <span>{fbStatus.msg}</span>
               </div>
             )}
 
-            <button onClick={() => { db.settings.put({...settings, id: 'config'}); alert('Configurações Salvas!') }} className="w-full py-6 bg-slate-900 dark:bg-white text-white dark:text-black font-black rounded-3xl shadow-2xl transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">Salvar Tudo</button>
+            {/* Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-4 border-t border-black/5 dark:border-white/5">
+              <button
+                type="button"
+                disabled={fbStatus.testing}
+                onClick={handleTestFirebase}
+                className="py-4 px-6 rounded-2xl font-black text-xs uppercase tracking-wider bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
+              >
+                <Activity className="w-4 h-4 text-blue-500" />
+                <span>{fbStatus.testing ? 'Testando...' : 'Testar Conexão'}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={fbStatus.testing}
+                onClick={handleSaveFirebase}
+                className="py-4 px-6 rounded-2xl font-black text-xs uppercase tracking-wider bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xl shadow-blue-600/30 hover:opacity-95 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Salvar e Sincronizar</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={syncingAll}
+                onClick={handleExportAllToFirebase}
+                className="py-4 px-6 rounded-2xl font-black text-xs uppercase tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xl shadow-amber-500/30 hover:opacity-95 transition-all flex items-center justify-center space-x-2 active:scale-95 disabled:opacity-50"
+              >
+                {syncingAll ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4" />
+                )}
+                <span>{syncingAll ? 'Exportando...' : 'Exportar Base Local'}</span>
+              </button>
+            </div>
+
+            {fbStatus.isConfigured && (
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleDisconnectFirebase}
+                  className="text-xs font-bold text-red-500 hover:text-red-600 uppercase tracking-wider transition-colors flex items-center space-x-1.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Desconectar Firebase Deste Dispositivo</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2278,6 +3086,8 @@ function ApprovalsManager({ onAction }) {
         approvedBy: 'admin'
       })
     }
+    const updated = await db.records.get(record.id)
+    if (updated) await pushDocToFirestore('records', record.id, updated)
     loadPendencies()
     onAction()
   }
@@ -2694,11 +3504,12 @@ function HolidaysManager() {
       for (const h of data) {
         const exists = await db.holidays.where('date').equals(h.date).first()
         if (!exists) {
-          await db.holidays.add({
+          const hid = await db.holidays.add({
             date: h.date,
             name: h.name,
             type: 'national'
           })
+          await pushDocToFirestore('holidays', hid, { id: hid, date: h.date, name: h.name, type: 'national' })
         }
       }
       await loadHolidays()
@@ -2712,13 +3523,15 @@ function HolidaysManager() {
 
   const handleAdd = async () => {
     if (!newHoliday.date || !newHoliday.name) return
-    await db.holidays.add(newHoliday)
+    const hid = await db.holidays.add(newHoliday)
+    await pushDocToFirestore('holidays', hid, { id: hid, ...newHoliday })
     setNewHoliday({ date: '', name: '', type: 'municipal' })
     await loadHolidays()
   }
 
   const handleDelete = async (id) => {
     await db.holidays.delete(id)
+    await deleteDocFromFirestore('holidays', id)
     await loadHolidays()
   }
 

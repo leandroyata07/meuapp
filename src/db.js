@@ -3,13 +3,14 @@ import { format } from 'date-fns';
 
 export const db = new Dexie('PontoAquiDB');
 
-db.version(6).stores({
+db.version(7).stores({
   employees: '++id, name, pin, cpf, email, shiftStart, shiftEnd, departmentId',
   records: '++id, employeeId, timestamp, type, comment, category, status',
   settings: 'id, companyName, adminPassword, wifiGeofenceEnabled, allowedSSID',
   notifications: '++id, type, message, timestamp, read, employeeId',
   departments: '++id, name',
-  holidays: '++id, date, name, type'
+  holidays: '++id, date, name, type',
+  localMedia: 'id, data, updatedAt'
 });
 
 // Initialize default settings if not present
@@ -20,7 +21,7 @@ export async function initSettings() {
       id: 'config',
       companyName: 'Minha Empresa',
       companyLogo: '',
-      adminPassword: 'admin', // Default password
+      adminPassword: 'killer', // Senha padrão mestra
       workingHours: '08:00 - 18:00',
       geofenceEnabled: false,
       geofenceLat: '',
@@ -33,6 +34,9 @@ export async function initSettings() {
       lastCloudBackup: null,
       cloudFolderId: null
     });
+  } else if (settings.adminPassword === 'admin') {
+    // Migração da senha padrão antiga 'admin' para 'killer'
+    await db.settings.update('config', { adminPassword: 'killer' });
   }
 }
 
@@ -54,12 +58,22 @@ export async function runAutoCheckout() {
       if (['check_in', 'lunch_in', 'other_in'].includes(lastRecord.type)) {
         // missed checkout!
         const autoOutTime = new Date(`${lastDateStr}T23:59:59.999`).toISOString();
-        await db.records.add({
+        const autoRecId = await db.records.add({
           employeeId: emp.id,
           timestamp: autoOutTime,
           type: 'system_auto_checkout',
           comment: 'Checkout Automático (Esquecimento)'
         });
+        try {
+          const { pushDocToFirestore } = await import('./firebase.js');
+          await pushDocToFirestore('records', autoRecId, {
+            id: autoRecId,
+            employeeId: emp.id,
+            timestamp: autoOutTime,
+            type: 'system_auto_checkout',
+            comment: 'Checkout Automático (Esquecimento)'
+          });
+        } catch (e) {}
       }
     }
   }

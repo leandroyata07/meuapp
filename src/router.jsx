@@ -13,6 +13,7 @@ import { EmployeeSearch } from './components/EmployeeSearch'
 import { PinEntry } from './components/PinEntry'
 import { AdminLogin } from './components/AdminLogin'
 import { AdminDashboard } from './components/AdminDashboard'
+import { ThemeToggle } from './components/ThemeToggle'
 
 // Root Route
 const rootRoute = createRootRoute({

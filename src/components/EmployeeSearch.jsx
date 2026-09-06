@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Search, User, Clock, ArrowRight, Fingerprint, ShieldCheck, Building2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { ThemeToggle } from './ThemeToggle'
 
 export function EmployeeSearch() {
   const [search, setSearch] = useState('')
@@ -38,151 +39,185 @@ export function EmployeeSearch() {
   }, [search])
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-gradient-to-br from-slate-50 dark:from-slate-950 via-slate-100 dark:via-slate-900 to-blue-50 dark:to-blue-950 transition-all duration-1000">
-      <div className="w-full max-w-md space-y-10 py-12">
+    <div className="relative flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 overflow-hidden bg-slate-50 dark:bg-[#090D16] transition-colors duration-500">
+      {/* Top-Right Theme Toggle */}
+      <div className="absolute top-5 right-5 z-20">
+        <ThemeToggle />
+      </div>
+
+      {/* Background Ambient Glows */}
+      <div className="pointer-events-none absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-500/10 dark:bg-blue-600/15 rounded-full blur-[120px]" />
+      <div className="pointer-events-none absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-500/10 dark:bg-indigo-600/15 rounded-full blur-[120px]" />
+      <div className="pointer-events-none absolute top-[35%] right-[-5%] w-[350px] h-[350px] bg-emerald-500/5 dark:bg-emerald-500/10 rounded-full blur-[100px]" />
+
+      <div className="w-full max-w-md space-y-8 py-8 relative z-10">
         
         {/* Company Logo Section */}
-        <div className="flex flex-col items-center justify-center animate-in fade-in slide-in-from-top-8 duration-1000 fill-mode-both">
+        <div className="flex flex-col items-center justify-center animate-in fade-in slide-in-from-top-4 duration-700">
           {settings?.companyLogo ? (
-            <div className="w-32 h-32 mb-4 relative group">
-              <div className="absolute inset-0 bg-blue-500/20 rounded-[2.5rem] blur-2xl group-hover:blur-3xl transition-all" />
-              <img src={settings.companyLogo} alt="Logo" className="w-full h-full object-contain relative z-10" />
+            <div className="w-28 h-28 mb-3 relative group">
+              <div className="absolute inset-0 bg-blue-500/20 dark:bg-blue-500/30 rounded-3xl blur-2xl group-hover:blur-3xl transition-all" />
+              <img src={settings.companyLogo} alt="Logo" className="w-full h-full object-contain relative z-10 drop-shadow-md" />
             </div>
           ) : (
-            <div className="w-24 h-24 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-black/5 dark:border-white/10 shadow-2xl flex items-center justify-center mb-6 group hover:scale-110 transition-transform duration-500">
-              <Building2 className="w-10 h-10 text-slate-300 dark:text-slate-700 group-hover:text-blue-500 transition-colors" />
+            <div className="w-20 h-20 bg-white/80 dark:bg-slate-900/80 rounded-3xl border border-slate-200/80 dark:border-white/10 shadow-xl shadow-slate-200/50 dark:shadow-black/40 flex items-center justify-center mb-4 group hover:scale-105 transition-all duration-300">
+              <Building2 className="w-9 h-9 text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform" />
             </div>
           )}
         </div>
 
-        {/* Real-time Clock Component */}
-        <div className="flex flex-col items-center justify-center p-8 bg-white/40 dark:bg-white/5 border border-white dark:border-white/10 rounded-[3rem] shadow-2xl backdrop-blur-2xl relative overflow-hidden group animate-in zoom-in duration-700 delay-150 fill-mode-both">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-emerald-500/5 to-blue-600/5 opacity-50 group-hover:opacity-100 transition-opacity duration-700" />
-          <p className="text-[11px] font-black text-blue-500/60 dark:text-blue-400 uppercase tracking-[0.4em] mb-2">
-            {format(time, "EEEE, dd 'de' MMMM", { locale: ptBR })}
-          </p>
-          <p className="text-7xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums drop-shadow-2xl">
-            {format(time, 'HH:mm:ss')}
-          </p>
-          <div className="absolute bottom-3 right-4 flex items-center space-x-1.5 opacity-30">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[8px] text-slate-900 dark:text-white uppercase tracking-[0.2em] font-black">Ao Vivo</span>
+        {/* Real-time Clock Component - High Definition Display */}
+        <div className="glass-panel p-7 rounded-[2.5rem] shadow-2xl relative overflow-hidden group animate-in zoom-in duration-600">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-blue-500/50 to-transparent" />
+          
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-blue-600 dark:text-blue-400 tracking-wider uppercase font-mono">
+              {format(time, "EEEE, dd 'de' MMMM", { locale: ptBR })}
+            </span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold tracking-wider uppercase">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Ao Vivo</span>
+            </div>
+          </div>
+
+          <div className="text-center py-2">
+            <p className="text-6xl sm:text-7xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums font-mono drop-shadow-sm">
+              {format(time, 'HH:mm')}
+              <span className="text-3xl sm:text-4xl text-blue-600 dark:text-blue-400 font-semibold ml-1">
+                :{format(time, 'ss')}
+              </span>
+            </p>
           </div>
         </div>
 
-        <div className="text-center space-y-2 animate-in fade-in duration-500 delay-150 fill-mode-both">
-          <h1 className="text-4xl font-black tracking-tight text-slate-900 dark:text-white drop-shadow-md">
-            Ponto<span className="text-blue-500">Aqui</span>
+        {/* Header Title */}
+        <div className="text-center space-y-1.5 animate-in fade-in duration-500">
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Ponto<span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Aqui</span>
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 font-medium">Registre seu ponto com rapidez e segurança.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">
+            Localize seu perfil e registre seu ponto com segurança
+          </p>
         </div>
 
-        <div className="relative group animate-in fade-in zoom-in duration-500 delay-300 fill-mode-both">
-          <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
-            <Search className="w-5 h-5 text-slate-500 dark:text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+        {/* Modern Search Input */}
+        <div className="relative group animate-in fade-in duration-500 delay-150">
+          <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-slate-400 group-focus-within:text-blue-500 transition-colors">
+            <Search className="w-5 h-5" />
           </div>
           <input
             type="text"
-            className="block w-full p-4 pl-12 text-slate-900 dark:text-white bg-white/60 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none backdrop-blur-md transition-all font-medium text-lg placeholder:text-slate-600"
-            placeholder="Digite seu nome..."
+            className="block w-full py-4 pl-12 pr-4 text-slate-900 dark:text-white bg-white/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-white/10 rounded-2xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none backdrop-blur-xl shadow-lg shadow-slate-200/30 dark:shadow-black/30 transition-all font-medium text-base placeholder:text-slate-400"
+            placeholder="Digite seu nome para bater o ponto..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
+        {/* Employee Cards List */}
         <div className="space-y-3">
           {employees.map((emp, idx) => (
             <div
               key={emp.id}
-              className="w-full flex items-center justify-between p-4 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 border border-black/5 dark:border-white/5 hover:border-blue-500/50 rounded-2xl transition-all group animate-in slide-in-from-bottom-2"
-              style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}
+              className="glass-card flex items-center justify-between p-4 rounded-2xl shadow-sm hover:shadow-md transition-all group animate-in slide-in-from-bottom-2"
+              style={{ animationDelay: `${idx * 40}ms`, animationFillMode: 'both' }}
             >
               <button
                 onClick={() => navigate({ to: `/pin/${emp.id}` })}
-                className="flex flex-1 items-center space-x-4 text-left"
+                className="flex flex-1 items-center space-x-3.5 text-left min-w-0"
               >
-                <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center border border-blue-500/30 overflow-hidden shadow-inner relative">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 border border-blue-500/20 flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative group-hover:border-blue-500/50 transition-colors">
                   {emp.photo ? (
                     <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" />
                   ) : (
-                    <User className="w-6 h-6 text-blue-400" />
+                    <User className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                   )}
                   {emp.biometricId && (
-                    <div className="absolute bottom-0 right-0 bg-emerald-500 rounded-tl-lg p-0.5 shadow-lg">
-                      <Fingerprint className="w-3 h-3 text-slate-900 dark:text-white" />
+                    <div className="absolute bottom-0 right-0 bg-emerald-500 text-white rounded-tl-md p-0.5 shadow-sm">
+                      <Fingerprint className="w-2.5 h-2.5" />
                     </div>
                   )}
                 </div>
-                <div>
-                  <p className="text-slate-900 dark:text-white font-bold text-lg leading-tight tracking-tight">
-                    {emp.name}
-                    {emp.cpf === '000.000.000-00' && <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-black bg-orange-500 text-white uppercase tracking-tighter animate-pulse">Demo</span>}
+                <div className="truncate">
+                  <div className="flex items-center gap-2">
+                    <p className="text-slate-900 dark:text-white font-bold text-base leading-snug truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {emp.name}
+                    </p>
+                    {emp.cpf === '000.000.000-00' && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-500/20 text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                        Demo
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-0.5">
+                    <span>Tocar para registrar PIN</span>
                   </p>
-                  <p className="text-[10px] uppercase font-black tracking-widest mt-0.5 text-blue-400">Tocar para entrar com PIN</p>
                 </div>
               </button>
 
-              {emp.biometricId && (
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (window.PublicKeyCredential) {
-                      try {
-                        const assertion = await navigator.credentials.get({
-                          publicKey: {
-                            challenge: new Uint8Array(32),
-                            rpId: window.location.hostname,
-                            allowCredentials: [{
-                              type: 'public-key',
-                              id: Uint8Array.from(atob(emp.biometricId), c => c.charCodeAt(0))
-                            }],
-                            userVerification: 'required',
-                            timeout: 60000
+              <div className="flex items-center gap-2 pl-2">
+                {emp.biometricId && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (window.PublicKeyCredential) {
+                        try {
+                          const assertion = await navigator.credentials.get({
+                            publicKey: {
+                              challenge: new Uint8Array(32),
+                              rpId: window.location.hostname,
+                              allowCredentials: [{
+                                type: 'public-key',
+                                id: Uint8Array.from(atob(emp.biometricId), c => c.charCodeAt(0))
+                              }],
+                              userVerification: 'required',
+                              timeout: 60000
+                            }
+                          });
+                          if (assertion) {
+                            sessionStorage.setItem('biometricVerified', emp.id);
+                            navigate({ to: `/pin/${emp.id}` });
                           }
-                        });
-                        if (assertion) {
-                          sessionStorage.setItem('biometricVerified', emp.id);
-                          navigate({ to: `/pin/${emp.id}` });
+                        } catch (err) {
+                          console.warn('Biometria falhou:', err);
+                          alert('Falha na biometria. Use sua senha.');
                         }
-                      } catch (err) {
-                        console.warn('Biometria falhou:', err);
-                        alert('Falha na biometria. Use sua senha.');
                       }
-                    }
-                  }}
-                  className="ml-2 w-12 h-12 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 flex flex-col items-center justify-center border border-emerald-500/20 transition-all text-emerald-500 active:scale-90"
-                  title="Entrar com Biometria"
-                >
-                  <Fingerprint className="w-5 h-5" />
-                  <span className="text-[7px] font-black uppercase mt-1">BIO</span>
-                </button>
-              )}
+                    }}
+                    className="w-10 h-10 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 flex flex-col items-center justify-center border border-emerald-500/20 transition-all text-emerald-600 dark:text-emerald-400 active:scale-95 shadow-sm"
+                    title="Entrar com Biometria"
+                  >
+                    <Fingerprint className="w-4 h-4" />
+                    <span className="text-[7px] font-black uppercase mt-0.5">BIO</span>
+                  </button>
+                )}
 
-              {!emp.biometricId && (
                 <button 
                   onClick={() => navigate({ to: `/pin/${emp.id}` })}
-                  className="w-10 h-10 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center group-hover:bg-blue-500 transition-colors"
+                  className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-white/5 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-all text-slate-400 dark:text-slate-400 shadow-sm"
                 >
-                  <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-slate-900 dark:text-white transition-colors" />
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                 </button>
-              )}
+              </div>
             </div>
           ))}
           
           {search.length > 0 && employees.length === 0 && (
-            <div className="text-center py-8 animate-in fade-in">
-              <Search className="w-8 h-8 text-slate-700 mx-auto mb-3" />
-              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Nenhum perfil encontrado</p>
+            <div className="glass-panel text-center py-8 rounded-2xl animate-in fade-in">
+              <Search className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-50" />
+              <p className="text-slate-500 dark:text-slate-400 font-semibold text-sm">Nenhum funcionário localizado</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Verifique o nome digitado</p>
             </div>
           )}
         </div>
 
-        <div className="pt-12 text-center animate-in fade-in duration-1000 delay-700 fill-mode-both">
+        {/* Footer Admin Button */}
+        <div className="pt-6 text-center animate-in fade-in duration-700 delay-300">
           <button 
             onClick={() => navigate({ to: '/admin' })}
-            className="inline-flex items-center space-x-3 px-10 py-5 bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[1.5rem] text-[10px] font-black tracking-[0.3em] uppercase text-slate-500 hover:text-blue-600 dark:text-slate-400 hover:dark:text-blue-400 transition-all hover:bg-slate-50 dark:hover:bg-white/5 active:scale-95 shadow-sm group"
+            className="inline-flex items-center space-x-2 px-6 py-3 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-slate-200/80 dark:border-white/10 text-xs font-bold text-slate-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400 transition-all hover:shadow-md active:scale-95 backdrop-blur-md group"
           >
-            <ShieldCheck className="w-4 h-4 transition-transform group-hover:scale-110" />
+            <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 transition-transform group-hover:scale-110" />
             <span>Acesso Administrativo</span>
           </button>
         </div>

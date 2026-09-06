@@ -6,6 +6,9 @@ import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
 import { QRCodeSVG } from 'qrcode.react'
+import { ThemeToggle } from './ThemeToggle'
+import { toMinutes } from '../utils/shiftUtils'
+import { pushDocToFirestore } from '../firebase'
 
 const RECORD_TYPES = {
   check_in: { label: 'Entrada Principal', icon: LogIn, color: 'bg-emerald-500' },
@@ -359,7 +362,7 @@ export function PinEntry() {
       const [hour, minute] = retroDayTime.split(':').map(Number)
       const targetDateTime = new Date(year, month - 1, day, hour, minute, 0, 0)
 
-      await db.records.add({
+      const recId = await db.records.add({
         employeeId: employee.id,
         timestamp: targetDateTime.toISOString(),
         systemTimestamp: new Date().toISOString(),
@@ -369,10 +372,30 @@ export function PinEntry() {
         status: 'pending'
       })
 
-      await db.notifications.add({
+      await pushDocToFirestore('records', recId, {
+        id: recId,
+        employeeId: employee.id,
+        timestamp: targetDateTime.toISOString(),
+        systemTimestamp: new Date().toISOString(),
+        type: retroDayType,
+        comment: `Ponto Retroativo (${retroDayReason || 'Autorizado pela gestão'})`,
+        category: 'retroactive_day',
+        status: 'pending'
+      })
+
+      const notifId = await db.notifications.add({
         type: 'retroactive',
         message: `${employee.name} lançou ponto retroativo para ${format(targetDateTime, 'dd/MM/yyyy')} às ${retroDayTime} (${RECORD_TYPES[retroDayType]?.label || retroDayType}). Aguarda deferimento.`,
         timestamp: new Date(),
+        read: false,
+        employeeId: employee.id
+      })
+
+      await pushDocToFirestore('notifications', notifId, {
+        id: notifId,
+        type: 'retroactive',
+        message: `${employee.name} lançou ponto retroativo para ${format(targetDateTime, 'dd/MM/yyyy')} às ${retroDayTime} (${RECORD_TYPES[retroDayType]?.label || retroDayType}). Aguarda deferimento.`,
+        timestamp: new Date().toISOString(),
         read: false,
         employeeId: employee.id
       })
@@ -451,22 +474,39 @@ export function PinEntry() {
       if (locationData) recordData.location = locationData
       if (photoData) recordData.photo = photoData
       
-      await db.records.add(recordData)
+      const recId = await db.records.add(recordData)
+      await pushDocToFirestore('records', recId, { ...recordData, id: recId })
 
       // Create Admin Notifications
       if (isForgotten) {
-        await db.notifications.add({
+        const notifId = await db.notifications.add({
           type: 'esquecimento',
           message: `${employee.name} registrou ponto com declaração de esquecimento: informou chegada às ${forgottenTime} (registrado às ${format(now, 'HH:mm')}).`,
           timestamp: new Date(),
           read: false,
           employeeId: employee.id
         })
+        await pushDocToFirestore('notifications', notifId, {
+          id: notifId,
+          type: 'esquecimento',
+          message: `${employee.name} registrou ponto com declaração de esquecimento: informou chegada às ${forgottenTime} (registrado às ${format(now, 'HH:mm')}).`,
+          timestamp: new Date().toISOString(),
+          read: false,
+          employeeId: employee.id
+        })
       } else if (extraCategory === 'medico') {
-        await db.notifications.add({
+        const notifId = await db.notifications.add({
           type: 'medical',
           message: `${employee.name} registrou uma saída para o médico e anexou um comprovante/foto.`,
           timestamp: new Date(),
+          read: false,
+          employeeId: employee.id
+        })
+        await pushDocToFirestore('notifications', notifId, {
+          id: notifId,
+          type: 'medical',
+          message: `${employee.name} registrou uma saída para o médico e anexou um comprovante/foto.`,
+          timestamp: new Date().toISOString(),
           read: false,
           employeeId: employee.id
         })
@@ -480,11 +520,20 @@ export function PinEntry() {
         
         if (now > shiftStart) {
           const diffMin = Math.round((now - shiftStart) / 60000)
-          if (diffMin > 5) { // 5 min grace period
-            await db.notifications.add({
+          const tolerance = employee.toleranceMin ?? 10
+          if (diffMin > tolerance) { // Tolerância da CLT (Art. 58, § 1º)
+            const notifId = await db.notifications.add({
               type: 'late',
-              message: `${employee.name} chegou com ${diffMin} minutos de atraso (Turno: ${employee.shiftStart}).`,
+              message: `${employee.name} chegou com ${diffMin} minutos de atraso (Turno: ${employee.shiftStart}, Tolerância CLT: ${tolerance} min).`,
               timestamp: new Date(),
+              read: false,
+              employeeId: employee.id
+            })
+            await pushDocToFirestore('notifications', notifId, {
+              id: notifId,
+              type: 'late',
+              message: `${employee.name} chegou com ${diffMin} minutos de atraso (Turno: ${employee.shiftStart}, Tolerância CLT: ${tolerance} min).`,
+              timestamp: new Date().toISOString(),
               read: false,
               employeeId: employee.id
             })
@@ -604,9 +653,23 @@ export function PinEntry() {
     if (lastType === 'other_out') return 'other_in'
     if (lastType === 'check_in' || lastType === 'other_in' || lastType === 'lunch_in') {
       const now = new Date()
-      const hour = now.getHours()
-      if (hour >= 11 && hour <= 14 && !todayRecords.some(r => r.type === 'lunch_out')) return 'lunch_out'
-      if (hour >= 16) return 'check_out'
+      const nowMin = now.getHours() * 60 + now.getMinutes()
+      
+      const lunchStartMin = employee?.lunchStart ? toMinutes(employee.lunchStart) : (12 * 60)
+      const lunchEndMin = employee?.lunchEnd ? toMinutes(employee.lunchEnd) : (13 * 60)
+      const shiftEndMin = employee?.shiftEnd ? toMinutes(employee.shiftEnd) : (17 * 60)
+      
+      const hasLunchOut = todayRecords.some(r => r.type === 'lunch_out')
+      
+      // Se ainda não saiu para almoço e está na janela do horário de almoço do colaborador
+      if (!hasLunchOut && nowMin >= (lunchStartMin - 45) && nowMin < lunchEndMin) {
+        return 'lunch_out'
+      }
+      
+      // Se está próximo ou já passou do horário de saída definitiva do colaborador
+      if (nowMin >= (shiftEndMin - 45)) {
+        return 'check_out'
+      }
     }
     return null
   }
@@ -615,21 +678,30 @@ export function PinEntry() {
 
   return (
     <div 
-      className="flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+      className="relative flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 overflow-hidden bg-slate-50 dark:bg-[#090D16] text-slate-900 dark:text-white transition-colors duration-500"
       onClick={handleContainerClick}
     >
+      {/* Background Ambient Glows */}
+      <div className="pointer-events-none absolute top-[-10%] right-[-10%] w-[450px] h-[450px] bg-blue-500/10 dark:bg-blue-600/15 rounded-full blur-[120px]" />
+      <div className="pointer-events-none absolute bottom-[-10%] left-[-10%] w-[450px] h-[450px] bg-indigo-500/10 dark:bg-indigo-600/15 rounded-full blur-[120px]" />
+
       <button 
         onClick={(e) => {
           e.stopPropagation()
           navigate({ to: '/' })
         }}
-        className="absolute top-6 left-6 p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:text-white z-50"
+        className="absolute top-5 left-5 p-2.5 rounded-2xl bg-white/60 dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm active:scale-90 z-50 backdrop-blur-md"
+        title="Voltar para busca"
       >
-        <X className="w-6 h-6" />
+        <X className="w-5 h-5" />
       </button>
 
+      <div className="absolute top-5 right-5 z-50">
+        <ThemeToggle />
+      </div>
+
       {step === 'pin' && (
-        <div className="w-full max-w-sm space-y-8 text-center animate-in fade-in zoom-in duration-300">
+        <div className="w-full max-w-sm space-y-6 text-center animate-in fade-in zoom-in duration-400 relative z-10">
           <input
             ref={inputRef}
             type="tel"
@@ -641,82 +713,108 @@ export function PinEntry() {
             onKeyDown={handleKeyDown}
             className="absolute top-0 left-0 w-px h-px opacity-0 overflow-hidden"
           />
-          <div className="space-y-4">
-            <div className="w-24 h-24 mx-auto rounded-full bg-blue-500/20 flex items-center justify-center border-2 border-blue-500/30 overflow-hidden">
-              {employee.photo ? (
-                <img src={employee.photo} alt={employee.name} className="w-full h-full object-cover" />
-              ) : (
-                <User className="w-10 h-10 text-blue-400" />
-              )}
+          
+          <div className="glass-panel p-8 rounded-[2.5rem] shadow-2xl space-y-6 border border-slate-200/80 dark:border-white/10">
+            <div className="space-y-3">
+              <div className="w-24 h-24 mx-auto rounded-3xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 flex items-center justify-center border-2 border-blue-500/30 overflow-hidden shadow-lg p-0.5">
+                {employee.photo ? (
+                  <img src={employee.photo} alt={employee.name} className="w-full h-full object-cover rounded-[1.4rem]" />
+                ) : (
+                  <User className="w-10 h-10 text-blue-600 dark:text-blue-400" />
+                )}
+              </div>
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">{employee.name}</h2>
+                <p className="text-xs text-slate-400 dark:text-slate-400 mt-0.5 font-medium">Digite seu PIN de 4 dígitos</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-2xl font-bold">{employee.name}</h2>
-              <p className="text-slate-500 dark:text-slate-400">Insira sua senha para continuar</p>
+
+            {/* PIN Dots Indicator */}
+            <div className="flex justify-center items-center space-x-4 py-2">
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className={`w-4 h-4 rounded-full transition-all duration-300 ${
+                    pin.length > i 
+                      ? 'bg-blue-600 border-2 border-blue-400 shadow-md shadow-blue-500/40 scale-125' 
+                      : error 
+                        ? 'border-2 border-red-500 bg-red-500/20 animate-pulse' 
+                        : 'border-2 border-slate-300 dark:border-slate-700 bg-slate-200/50 dark:bg-white/5'
+                  }`}
+                />
+              ))}
             </div>
-          </div>
 
-          <div className="flex justify-center space-x-4 py-8">
-            {[0, 1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
-                  pin.length > i 
-                    ? 'bg-blue-500 border-blue-500 scale-125' 
-                    : error ? 'border-red-500 animate-pulse' : 'border-slate-700'
-                }`}
-              />
-            ))}
-          </div>
-
-          <div className="grid grid-cols-3 gap-4 max-w-[280px] mx-auto">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+            {/* Keypad */}
+            <div className="grid grid-cols-3 gap-3 max-w-[260px] mx-auto pt-2">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  onClick={(e) => { e.stopPropagation(); handleNumber(num.toString()) }}
+                  className="w-16 h-16 rounded-2xl bg-white/70 dark:bg-white/5 hover:bg-white dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 text-2xl font-bold font-mono text-slate-900 dark:text-white transition-all shadow-sm active:scale-90 hover:shadow-md"
+                >
+                  {num}
+                </button>
+              ))}
               <button
-                key={num}
-                onClick={(e) => { e.stopPropagation(); handleNumber(num.toString()) }}
-                className="w-16 h-16 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 border border-black/5 dark:border-white/5 text-2xl font-semibold transition-all active:scale-90"
+                onClick={(e) => { e.stopPropagation(); handleDelete() }}
+                className="w-16 h-16 rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-white/5 transition-all active:scale-90"
+                title="Apagar"
               >
-                {num}
+                <Delete className="w-6 h-6" />
               </button>
-            ))}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleDelete() }}
-              className="w-16 h-16 rounded-full flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-all active:scale-90"
-            >
-              <Delete className="w-6 h-6" />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleNumber('0') }}
-              className="w-16 h-16 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:bg-white/10 border border-black/5 dark:border-white/5 text-2xl font-semibold transition-all active:scale-90"
-            >
-              0
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handlePinSubmit() }}
-              disabled={pin.length < 4}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all active:scale-90 ${
-                pin.length === 4 ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'text-slate-600'
-              }`}
-            >
-              <Check className="w-8 h-8" />
-            </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleNumber('0') }}
+                className="w-16 h-16 rounded-2xl bg-white/70 dark:bg-white/5 hover:bg-white dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 text-2xl font-bold font-mono text-slate-900 dark:text-white transition-all shadow-sm active:scale-90 hover:shadow-md"
+              >
+                0
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handlePinSubmit() }}
+                disabled={pin.length < 4}
+                className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all active:scale-90 ${
+                  pin.length === 4 
+                    ? 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 hover:scale-105' 
+                    : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5 cursor-not-allowed'
+                }`}
+                title="Confirmar"
+              >
+                <Check className="w-7 h-7" />
+              </button>
+            </div>
+
+            {error && (
+              <p className="text-red-500 text-xs font-bold animate-bounce bg-red-500/10 py-2 rounded-xl border border-red-500/20">
+                Senha incorreta! Tente novamente.
+              </p>
+            )}
           </div>
-          {error && <p className="text-red-500 font-medium animate-bounce">Senha incorreta!</p>}
         </div>
       )}
 
       {step === 'select' && (
-        <div className="w-full max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="flex items-center space-x-6 bg-black/5 dark:bg-white/5 p-6 rounded-3xl border border-black/10 dark:border-white/10">
-            <div className="w-20 h-20 rounded-2xl bg-blue-500/20 flex items-center justify-center border border-blue-500/30 overflow-hidden flex-shrink-0">
+        <div className="w-full max-w-2xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-400 relative z-10">
+          <div className="glass-panel p-6 rounded-3xl shadow-xl flex items-center space-x-5 border border-slate-200/80 dark:border-white/10">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 flex items-center justify-center border border-blue-500/30 overflow-hidden flex-shrink-0 shadow-sm p-0.5">
               {employee.photo ? (
-                <img src={employee.photo} alt={employee.name} className="w-full h-full object-cover" />
+                <img src={employee.photo} alt={employee.name} className="w-full h-full object-cover rounded-xl" />
               ) : (
-                <User className="w-8 h-8 text-blue-400" />
+                <User className="w-8 h-8 text-blue-600 dark:text-blue-400" />
               )}
             </div>
             <div>
-              <h2 className="text-2xl font-bold">Olá, {employee.name.split(' ')[0]}!</h2>
-              <p className="text-slate-500 dark:text-slate-400">Status atual: {todayRecords.length === 0 ? 'Aguardando Entrada' : 'Jornada em andamento'}</p>
+              <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                Olá, {employee.name.split(' ')[0]}!
+              </h2>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  {todayRecords.length === 0 ? 'Aguardando Entrada' : 'Jornada em andamento'}
+                </span>
+                <span className="text-xs text-slate-400 font-medium">
+                  • {todayRecords.length} registro(s) hoje
+                </span>
+              </div>
             </div>
           </div>
 
@@ -851,7 +949,7 @@ export function PinEntry() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             {Object.entries(RECORD_TYPES).map(([key, config]) => {
               const Icon = config.icon
               const isSelected = selectedType === key
@@ -865,24 +963,35 @@ export function PinEntry() {
                     onClick={() => handleRecord(key)}
                     className={`w-full p-4 rounded-2xl border transition-all flex items-center justify-between group active:scale-[0.98] ${
                       disabled 
-                        ? 'opacity-30 grayscale cursor-not-allowed' 
+                        ? 'opacity-35 grayscale cursor-not-allowed bg-slate-100/50 dark:bg-slate-900/30 border-slate-200/50 dark:border-white/5' 
                         : isSelected 
-                          ? 'bg-black/10 dark:bg-white/10 border-black/40 dark:border-white/40 ring-2 ring-blue-500' 
+                          ? 'glass-card border-blue-500/80 ring-2 ring-blue-500/40 shadow-lg shadow-blue-500/10' 
                           : isSuggested
-                            ? 'bg-blue-500/10 border-blue-500/50 hover:bg-blue-500/20 animate-pulse-subtle'
-                            : 'bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 hover:bg-black/10 dark:bg-white/10 hover:border-black/20 dark:border-white/20'
+                            ? 'bg-blue-500/10 border-blue-500/40 hover:bg-blue-500/15 shadow-md shadow-blue-500/10'
+                            : 'glass-card border-slate-200/80 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/20'
                     }`}
                   >
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-12 h-12 rounded-xl ${disabled ? 'bg-slate-700' : config.color} flex items-center justify-center shadow-lg transition-transform group-hover:scale-110`}>
-                        <Icon className="w-6 h-6 text-slate-900 dark:text-white" />
+                    <div className="flex items-center space-x-3.5">
+                      <div className={`w-12 h-12 rounded-xl ${disabled ? 'bg-slate-400 dark:bg-slate-800 text-slate-500' : config.color} text-white flex items-center justify-center shadow-md transition-transform group-hover:scale-105 shrink-0`}>
+                        <Icon className="w-6 h-6" />
                       </div>
                       <div className="text-left">
-                        <span className="font-semibold text-lg block">{config.label}</span>
-                        {isSuggested && <span className="text-[10px] text-blue-400 uppercase font-bold tracking-widest">Sugerido</span>}
+                        <span className="font-bold text-base block text-slate-900 dark:text-white leading-tight">{config.label}</span>
+                        {isSuggested ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 uppercase font-black tracking-wider mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                            Sugerido agora
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 font-medium">Toque para bater</span>
+                        )}
                       </div>
                     </div>
-                    {!disabled && <Check className={`w-5 h-5 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'}`} />}
+                    {!disabled && (
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${isSelected ? 'bg-blue-600 text-white' : 'text-slate-300 dark:text-slate-600 group-hover:text-blue-500'}`}>
+                        <Check className="w-4 h-4" />
+                      </div>
+                    )}
                   </button>
                   
                   {isSelected && config.needsReason && (
@@ -1023,54 +1132,84 @@ export function PinEntry() {
       )}
 
       {step === 'success' && (
-        <div className="w-full max-w-sm text-center space-y-8 animate-in fade-in zoom-in duration-500">
-          <div className="relative mx-auto w-32 h-32">
+        <div className="w-full max-w-sm text-center space-y-6 animate-in fade-in zoom-in duration-400 relative z-10">
+          {/* Animated Success Badge with Pulse Ring */}
+          <div className="relative mx-auto w-24 h-24">
             <div className="absolute inset-0 bg-emerald-500/20 rounded-full animate-ping" />
-            <div className="relative w-32 h-32 rounded-full bg-emerald-500 flex items-center justify-center shadow-2xl shadow-emerald-500/40">
-              <Check className="w-16 h-16 text-slate-900 dark:text-white stroke-[3px]" />
+            <div className="relative w-24 h-24 rounded-3xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center shadow-xl shadow-emerald-500/30">
+              <Check className="w-12 h-12 text-white stroke-[3px]" />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <h2 className="text-3xl font-bold text-emerald-400">Sucesso!</h2>
-            <p className="text-xl text-slate-600 dark:text-slate-300">
-              {RECORD_TYPES[selectedType]?.label} registrado às <span className="font-bold text-slate-900 dark:text-white">{format(recordedTime, 'HH:mm')}</span>
+          <div className="space-y-1">
+            <h2 className="text-2xl font-extrabold text-emerald-500 dark:text-emerald-400 tracking-tight">
+              Ponto Registrado!
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">
+              Identidade e horário autenticados com sucesso
             </p>
           </div>
 
-          {extraCategory === 'esquecimento' && (
-            <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl text-left space-y-1 animate-in slide-in-from-bottom-2">
-              <div className="flex items-center space-x-2 text-orange-600 dark:text-orange-400 font-bold text-xs uppercase tracking-wider">
-                <Clock className="w-4 h-4" />
-                <span>Solicitação de Ajuste de Chegada</span>
+          {/* Mini Wallet Pass Card */}
+          <div className="glass-panel p-6 rounded-3xl border border-slate-200/80 dark:border-white/10 shadow-xl text-left space-y-4 relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+            
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tipo de Registro</p>
+                <p className="text-base font-extrabold text-slate-900 dark:text-white leading-tight">
+                  {RECORD_TYPES[selectedType]?.label}
+                </p>
               </div>
-              <p className="text-xs text-slate-700 dark:text-slate-300">
-                Você declarou chegada às <strong className="text-orange-600 dark:text-orange-400 font-mono text-sm">{forgottenTime}</strong>. A solicitação foi enviada para validação do Administrador.
-              </p>
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Horário Gravado</p>
+                <p className="text-2xl font-extrabold font-mono text-emerald-600 dark:text-emerald-400">
+                  {format(recordedTime, 'HH:mm:ss')}
+                </p>
+              </div>
             </div>
-          )}
 
-          <div className="pt-4 flex flex-col space-y-3">
+            <div className="pt-3 border-t border-slate-200/60 dark:border-white/10 flex items-center justify-between text-xs">
+              <span className="text-slate-400 font-medium font-mono">{format(recordedTime, 'dd/MM/yyyy')}</span>
+              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-[11px]">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Criptografia SHA-256
+              </span>
+            </div>
+
+            {extraCategory === 'esquecimento' && (
+              <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-1 animate-in slide-in-from-bottom-2">
+                <div className="flex items-center space-x-1.5 text-orange-600 dark:text-orange-400 font-bold text-[11px] uppercase tracking-wider">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Ajuste de Chegada Declarado</span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Horário declarado: <strong className="text-orange-600 dark:text-orange-400 font-mono">{forgottenTime}</strong> (em análise pelo administrador).
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col space-y-2.5 pt-1">
             <button
               onClick={handleShareReceipt}
-              className="w-full py-4 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 font-black rounded-2xl transition-all active:scale-[0.98] uppercase tracking-widest text-xs flex items-center justify-center border border-emerald-500/30"
+              className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/25 transition-all active:scale-[0.98] text-xs uppercase tracking-wider flex items-center justify-center space-x-2"
             >
-              <Share2 className="w-4 h-4 mr-2" /> Gerar Comprovante Digital
+              <Share2 className="w-4 h-4" />
+              <span>Ver Comprovante Digital (Ticket)</span>
             </button>
             
             <button
               onClick={() => navigate({ to: '/' })}
-              className="w-full py-3 text-slate-500 hover:text-slate-900 dark:text-white text-xs font-bold uppercase tracking-widest transition-colors"
+              className="w-full py-3 glass-card rounded-2xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-[0.98]"
             >
-              Voltar ao Início
+              Concluir e Voltar
             </button>
           </div>
 
-          <div className="pt-2">
-            <div className="inline-flex items-center space-x-2 px-4 py-2 bg-black/5 dark:bg-white/5 rounded-full text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
-              <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-              <span>Redirecionando automaticamente...</span>
-            </div>
+          <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200/50 dark:border-white/5 text-slate-400 text-[10px] font-semibold tracking-wider uppercase">
+            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+            <span>Retornando ao início automaticamente...</span>
           </div>
         </div>
       )}

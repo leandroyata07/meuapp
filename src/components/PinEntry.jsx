@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, Mail } from 'lucide-react'
+import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, Mail, Calendar } from 'lucide-react'
 import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
@@ -47,11 +47,27 @@ export function PinEntry() {
   const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const ticketRef = useRef(null)
 
+  // Ajuste de Ponto Esquecido no mesmo dia
+  const [isForgottenOpen, setIsForgottenOpen] = useState(false)
+  const [forgottenType, setForgottenType] = useState('check_in')
+  const [forgottenTime, setForgottenTime] = useState(format(new Date(), 'HH:mm'))
+  const [forgottenReason, setForgottenReason] = useState('')
+
+  // Inclusão de Pontos de Dias Anteriores (quando autorizado)
+  const [retroDayDate, setRetroDayDate] = useState('')
+  const [retroDayType, setRetroDayType] = useState('check_in')
+  const [retroDayTime, setRetroDayTime] = useState('08:00')
+  const [retroDayReason, setRetroDayReason] = useState('')
+  const [isSubmittingRetro, setIsSubmittingRetro] = useState(false)
+
   useEffect(() => {
     db.settings.get('config').then(setSettings)
     db.employees.get(Number(employeeId)).then(emp => {
       setEmployee(emp)
       if (emp?.cpf === '000.000.000-00') setIsDemo(true)
+      if (emp?.allowRetroactive && emp?.retroactiveStart) {
+        setRetroDayDate(emp.retroactiveStart)
+      }
       if (sessionStorage.getItem('biometricVerified') === String(employeeId)) {
         sessionStorage.removeItem('biometricVerified')
         setStep('select')
@@ -97,7 +113,7 @@ export function PinEntry() {
   const handleShareReceipt = async () => {
     if (redirectTimer) clearTimeout(redirectTimer)
     
-    const text = `*COMPROVANTE DE PONTO*\n\n🏢 *Empresa:* ${settings?.companyName || 'Empresa'}\n👤 *Funcionário:* ${employee.name}\n📅 *Data:* ${format(recordedTime, 'dd/MM/yyyy')}\n⏰ *Hora:* ${format(recordedTime, 'HH:mm')}\n📝 *Registro:* ${RECORD_TYPES[selectedType].label}\n🔑 *Autenticação:* ${recordedTime.getTime().toString(16).toUpperCase()}`
+    const text = `*COMPROVANTE DE PONTO*\n\n🏢 *Empresa:* ${settings?.companyName || 'Empresa'}\n👤 *Funcionário:* ${employee.name}\n📅 *Data:* ${format(recordedTime, 'dd/MM/yyyy')}\n⏰ *Hora do Registro:* ${format(recordedTime, 'HH:mm')}${extraCategory === 'esquecimento' ? `\n🕒 *Chegada Declarada:* ${forgottenTime} (Em análise pelo Administrador)` : ''}\n📝 *Registro:* ${RECORD_TYPES[selectedType].label}\n🔑 *Autenticação:* ${recordedTime.getTime().toString(16).toUpperCase()}`
 
     if (navigator.share) {
       try {
@@ -310,6 +326,68 @@ export function PinEntry() {
     }
   }
 
+  const handleStartForgottenRecord = () => {
+    if (!forgottenTime) {
+      alert('Por favor, informe o horário em que você realmente chegou.')
+      return
+    }
+    setSelectedType(forgottenType)
+    setExtraCategory('esquecimento')
+    setReason(forgottenReason)
+    setIsForgottenOpen(false)
+    setStep('camera')
+  }
+
+  const handleSaveRetroDay = async (e) => {
+    e.preventDefault()
+    if (!retroDayDate || !retroDayTime) {
+      alert('Por favor, informe a data e o horário.')
+      return
+    }
+    if (employee?.retroactiveStart && retroDayDate < employee.retroactiveStart) {
+      alert(`A data não pode ser anterior ao início autorizado (${format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')}).`)
+      return
+    }
+    if (employee?.retroactiveEnd && retroDayDate > employee.retroactiveEnd) {
+      alert(`A data não pode ser posterior ao fim autorizado (${format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}).`)
+      return
+    }
+
+    setIsSubmittingRetro(true)
+    try {
+      const [year, month, day] = retroDayDate.split('-').map(Number)
+      const [hour, minute] = retroDayTime.split(':').map(Number)
+      const targetDateTime = new Date(year, month - 1, day, hour, minute, 0, 0)
+
+      await db.records.add({
+        employeeId: employee.id,
+        timestamp: targetDateTime.toISOString(),
+        systemTimestamp: new Date().toISOString(),
+        type: retroDayType,
+        comment: `Ponto Retroativo (${retroDayReason || 'Autorizado pela gestão'})`,
+        category: 'retroactive_day',
+        status: 'pending'
+      })
+
+      await db.notifications.add({
+        type: 'retroactive',
+        message: `${employee.name} lançou ponto retroativo para ${format(targetDateTime, 'dd/MM/yyyy')} às ${retroDayTime} (${RECORD_TYPES[retroDayType]?.label || retroDayType}). Aguarda deferimento.`,
+        timestamp: new Date(),
+        read: false,
+        employeeId: employee.id
+      })
+
+      alert('Ponto retroativo enviado com sucesso para a aprovação do Administrador!')
+      setRetroDayReason('')
+      setStep('select')
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao enviar ponto retroativo.')
+    } finally {
+      setIsSubmittingRetro(false)
+    }
+  }
+
   const handleRecord = async (type, category = null) => {
     if (isProcessing) return
     if (RECORD_TYPES[type].needsReason && !category) {
@@ -357,13 +435,18 @@ export function PinEntry() {
     const now = simulateTime ? new Date(`${customDate}T${customTime}:00`) : new Date()
 
     const saveRecord = async (locationData = null) => {
+      const isForgotten = extraCategory === 'esquecimento'
       const recordData = {
         employeeId: employee.id,
         timestamp: now.toISOString(),
+        systemTimestamp: now.toISOString(),
+        declaredTime: isForgotten ? forgottenTime : null,
         type: selectedType, 
-        comment: extraCategory ? { medico: 'Médico', pessoal: 'Pessoal', servico: 'A Serviço' }[extraCategory] : '',
+        comment: isForgotten 
+          ? `Ajuste por Esquecimento (Chegada Declarada: ${forgottenTime}) - ${reason || 'Sem observações'}`
+          : extraCategory ? { medico: 'Médico', pessoal: 'Pessoal', servico: 'A Serviço' }[extraCategory] : '',
         category: extraCategory,
-        status: extraCategory === 'medico' ? 'pending' : 'auto'
+        status: (extraCategory === 'medico' || isForgotten) ? 'pending' : 'auto'
       }
       if (locationData) recordData.location = locationData
       if (photoData) recordData.photo = photoData
@@ -371,7 +454,15 @@ export function PinEntry() {
       await db.records.add(recordData)
 
       // Create Admin Notifications
-      if (extraCategory === 'medico') {
+      if (isForgotten) {
+        await db.notifications.add({
+          type: 'esquecimento',
+          message: `${employee.name} registrou ponto com declaração de esquecimento: informou chegada às ${forgottenTime} (registrado às ${format(now, 'HH:mm')}).`,
+          timestamp: new Date(),
+          read: false,
+          employeeId: employee.id
+        })
+      } else if (extraCategory === 'medico') {
         await db.notifications.add({
           type: 'medical',
           message: `${employee.name} registrou uma saída para o médico e anexou um comprovante/foto.`,
@@ -382,7 +473,7 @@ export function PinEntry() {
       }
 
       // Late Check-in Notification
-      if (selectedType === 'check_in' && employee.shiftStart) {
+      if (selectedType === 'check_in' && employee.shiftStart && !isForgotten) {
         const [h, m] = employee.shiftStart.split(':').map(Number)
         const shiftStart = new Date(now)
         shiftStart.setHours(h, m, 0, 0)
@@ -665,6 +756,101 @@ export function PinEntry() {
             </div>
           )}
 
+          {/* Banner de Liberação de Dias Anteriores */}
+          {employee?.allowRetroactive && employee?.retroactiveStart && employee?.retroactiveEnd && (
+            <div className="p-6 bg-indigo-600/10 border border-indigo-500/30 rounded-[2rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in slide-in-from-top-3">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 shrink-0">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 dark:text-white text-base">Inclusão de Dias Anteriores Liberada</h4>
+                  <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                    Autorizado de {format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')} até {format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep('retroactive_day')}
+                className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/20 active:scale-95 shrink-0"
+              >
+                Lançar Pontos
+              </button>
+            </div>
+          )}
+
+          {/* Card de Ponto Esquecido no Mesmo Dia */}
+          <div className="p-6 bg-orange-500/10 border border-orange-500/30 rounded-[2rem] space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-orange-500 text-white flex items-center justify-center shadow-lg shadow-orange-500/20 shrink-0">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 dark:text-white text-sm">Esqueceu de bater no horário exato?</h4>
+                  <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">Declare a sua chegada retroativa para aprovação da administração</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsForgottenOpen(!isForgottenOpen)}
+                className="w-full sm:w-auto px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-md shadow-orange-500/20 active:scale-95 shrink-0"
+              >
+                {isForgottenOpen ? 'Fechar Declaração' : 'Declarar Chegada'}
+              </button>
+            </div>
+
+            {isForgottenOpen && (
+              <div className="p-5 bg-white/80 dark:bg-black/50 rounded-2xl border border-orange-500/20 space-y-4 animate-in zoom-in duration-300">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Tipo de Registro</label>
+                    <select
+                      value={forgottenType}
+                      onChange={e => setForgottenType(e.target.value)}
+                      className="w-full p-3.5 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold text-xs outline-none focus:ring-2 focus:ring-orange-500"
+                    >
+                      <option value="check_in">Entrada Principal</option>
+                      <option value="lunch_in">Retorno Refeição (Volta do Almoço)</option>
+                      <option value="check_out">Saída Definitiva</option>
+                      <option value="lunch_out">Saída Refeição</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Horário Real em que Chegou</label>
+                    <input
+                      type="time"
+                      value={forgottenTime}
+                      onChange={e => setForgottenTime(e.target.value)}
+                      className="w-full p-3 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Justificativa do Esquecimento</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Cheguei às 08h, fui direto atender cliente e esqueci de registrar..."
+                    value={forgottenReason}
+                    onChange={e => setForgottenReason(e.target.value)}
+                    className="w-full p-3.5 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-xs outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleStartForgottenRecord}
+                  className="w-full py-4 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-500/20 active:scale-95 flex items-center justify-center space-x-2"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Prosseguir para Foto Selfie e Confirmar</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Object.entries(RECORD_TYPES).map(([key, config]) => {
               const Icon = config.icon
@@ -852,6 +1038,18 @@ export function PinEntry() {
             </p>
           </div>
 
+          {extraCategory === 'esquecimento' && (
+            <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl text-left space-y-1 animate-in slide-in-from-bottom-2">
+              <div className="flex items-center space-x-2 text-orange-600 dark:text-orange-400 font-bold text-xs uppercase tracking-wider">
+                <Clock className="w-4 h-4" />
+                <span>Solicitação de Ajuste de Chegada</span>
+              </div>
+              <p className="text-xs text-slate-700 dark:text-slate-300">
+                Você declarou chegada às <strong className="text-orange-600 dark:text-orange-400 font-mono text-sm">{forgottenTime}</strong>. A solicitação foi enviada para validação do Administrador.
+              </p>
+            </div>
+          )}
+
           <div className="pt-4 flex flex-col space-y-3">
             <button
               onClick={handleShareReceipt}
@@ -874,6 +1072,89 @@ export function PinEntry() {
               <span>Redirecionando automaticamente...</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {step === 'retroactive_day' && (
+        <div className="w-full max-w-lg space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <button 
+            onClick={() => setStep('select')}
+            className="flex items-center space-x-2 text-slate-500 hover:text-slate-900 dark:text-white transition-colors text-sm font-bold"
+          >
+            <X className="w-4 h-4" />
+            <span>Cancelar e Voltar</span>
+          </button>
+
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 bg-indigo-600/20 rounded-2xl flex items-center justify-center mx-auto mb-2 text-indigo-500 border border-indigo-500/30">
+              <Calendar className="w-8 h-8" />
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Lançar Ponto de Dias Anteriores</h2>
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
+              Período autorizado pela gestão: <strong className="text-indigo-500">{employee?.retroactiveStart ? format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong> até <strong className="text-indigo-500">{employee?.retroactiveEnd ? format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong>.
+            </p>
+          </div>
+
+          <form onSubmit={handleSaveRetroDay} className="p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Data do Ponto</label>
+              <input 
+                type="date" 
+                min={employee?.retroactiveStart || undefined}
+                max={employee?.retroactiveEnd || undefined}
+                required
+                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                value={retroDayDate}
+                onChange={e => setRetroDayDate(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Tipo de Marcação</label>
+              <select 
+                value={retroDayType} 
+                onChange={e => setRetroDayType(e.target.value)}
+                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="check_in">Entrada Principal</option>
+                <option value="lunch_out">Saída Refeição (Almoço)</option>
+                <option value="lunch_in">Retorno Refeição (Almoço)</option>
+                <option value="check_out">Saída Definitiva</option>
+                <option value="other_in">Retorno Extra</option>
+                <option value="other_out">Saída Extra</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Horário Real em que Ocorreu</label>
+              <input 
+                type="time" 
+                required
+                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-xl text-center outline-none focus:ring-2 focus:ring-indigo-500"
+                value={retroDayTime}
+                onChange={e => setRetroDayTime(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Justificativa / Motivo</label>
+              <textarea 
+                rows="3"
+                placeholder="Ex: Registro manual em folha física no início das atividades na empresa..."
+                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-medium text-sm outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
+                value={retroDayReason}
+                onChange={e => setRetroDayReason(e.target.value)}
+              />
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={isSubmittingRetro}
+              className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 transition-all active:scale-[0.98] uppercase tracking-widest text-xs flex items-center justify-center space-x-2 disabled:opacity-50"
+            >
+              <span>{isSubmittingRetro ? 'Enviando...' : 'Enviar para Aprovação do Administrador'}</span>
+            </button>
+          </form>
         </div>
       )}
 
@@ -925,8 +1206,8 @@ export function PinEntry() {
                             {r.comment && (
                               <span className="text-[10px] text-blue-500 italic truncate max-w-[120px] font-medium">({r.comment})</span>
                             )}
-                            {r.category === 'medico' && (
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                            {['medico', 'esquecimento', 'retroactive_day'].includes(r.category) && (
+                              <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${
                                 r.status === 'pending' ? 'bg-orange-500/20 text-orange-500' :
                                 r.status === 'approved' ? 'bg-emerald-500/20 text-emerald-500' :
                                 'bg-red-500/20 text-red-500'

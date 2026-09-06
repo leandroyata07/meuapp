@@ -193,36 +193,53 @@ export function AdminDashboard() {
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 mt-4 w-96 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-[2.5rem] shadow-2xl z-[100] p-6 space-y-4 animate-in slide-in-from-top-4">
-                <div className="flex justify-between items-center pb-4 border-b border-black/5 dark:border-white/5">
-                  <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-[0.2em]">Notificações</h3>
-                  <button onClick={clearAllNotifications} className="text-[10px] font-black text-blue-600 hover:text-red-500 uppercase tracking-widest transition-colors">Limpar Tudo</button>
-                </div>
-                <div className="max-h-96 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                  {notifications.length === 0 ? (
-                    <div className="text-center py-10 opacity-50">
-                      <Bell className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Nenhum aviso no momento</p>
-                    </div>
-                  ) : (
-                    notifications.map(n => (
-                      <div 
-                        key={n.id} 
-                        onClick={() => markNotificationRead(n.id)}
-                        className={`p-4 rounded-3xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-50 dark:bg-white/5 border-transparent opacity-60' : 'bg-blue-600/5 border-blue-500/20 hover:border-blue-500/40 shadow-sm'}`}
-                      >
-                        <div className="flex justify-between items-start mb-2">
-                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-widest ${n.type === 'medical' ? 'bg-purple-500/10 text-purple-600' : 'bg-blue-500/10 text-blue-600'}`}>
-                            {n.type === 'medical' ? 'Atestado' : n.type === 'geofence' ? 'Localização' : 'Sistema'}
-                          </span>
-                          <span className="text-[8px] text-slate-400 font-mono">{format(n.timestamp, 'HH:mm')}</span>
-                        </div>
-                        <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-relaxed group-hover:text-blue-600 transition-colors">{n.message}</p>
+              <>
+                <div 
+                  className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-xs sm:hidden"
+                  onClick={() => setShowNotifications(false)} 
+                />
+                <div className="fixed left-3 right-3 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-4 sm:w-96 max-w-lg mx-auto bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl z-[100] p-5 sm:p-6 space-y-4 animate-in slide-in-from-top-4">
+                  <div className="flex justify-between items-center pb-4 border-b border-black/5 dark:border-white/5">
+                    <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-[0.2em]">Notificações</h3>
+                    <button onClick={clearAllNotifications} className="text-[10px] font-black text-blue-600 hover:text-red-500 uppercase tracking-widest transition-colors">Limpar Tudo</button>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                    {notifications.length === 0 ? (
+                      <div className="text-center py-10 opacity-50">
+                        <Bell className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                        <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Nenhum aviso no momento</p>
                       </div>
-                    ))
-                  )}
+                    ) : (
+                      notifications.map(n => (
+                        <div 
+                          key={n.id} 
+                          onClick={() => markNotificationRead(n.id)}
+                          className={`p-4 rounded-3xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-50 dark:bg-white/5 border-transparent opacity-60' : 'bg-blue-600/5 border-blue-500/20 hover:border-blue-500/40 shadow-sm'}`}
+                        >
+                          <div className="flex justify-between items-start mb-2 gap-2">
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-widest shrink-0 ${
+                              n.type === 'medical' ? 'bg-purple-500/10 text-purple-600' :
+                              n.type === 'esquecimento' ? 'bg-orange-500/10 text-orange-600' :
+                              n.type === 'retroactive' ? 'bg-indigo-500/10 text-indigo-600' :
+                              n.type === 'late' ? 'bg-amber-500/10 text-amber-600' :
+                              n.type === 'geofence' ? 'bg-emerald-500/10 text-emerald-600' :
+                              'bg-blue-500/10 text-blue-600'
+                            }`}>
+                              {n.type === 'medical' ? 'Atestado' :
+                               n.type === 'esquecimento' ? 'Esquecimento' :
+                               n.type === 'retroactive' ? 'Dia Anterior' :
+                               n.type === 'late' ? 'Atraso' :
+                               n.type === 'geofence' ? 'Localização' : 'Sistema'}
+                            </span>
+                            <span className="text-[8px] text-slate-400 font-mono shrink-0">{n.timestamp ? format(new Date(n.timestamp), 'dd/MM HH:mm') : ''}</span>
+                          </div>
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-relaxed break-words group-hover:text-blue-600 transition-colors">{n.message}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
+              </>
             )}
           </div>
 
@@ -464,9 +481,14 @@ function EmployeeManager({ employees, departments, onDataChange }) {
     startDate: format(new Date(), 'yyyy-MM-dd'), 
     photo: '', 
     email: '',
+    cpf: '',
+    biometricId: '',
     shiftStart: '08:00',
     shiftEnd: '17:00',
-    departmentId: ''
+    departmentId: '',
+    allowRetroactive: false,
+    retroactiveStart: '',
+    retroactiveEnd: ''
   })
   const [searchTerm, setSearchTerm] = useState('')
   const [showAll, setShowAll] = useState(false)
@@ -501,11 +523,15 @@ function EmployeeManager({ employees, departments, onDataChange }) {
       email: '',
       biometricId: '',
       shiftStart: '08:00',
-      shiftEnd: '17:00'
+      shiftEnd: '17:00',
+      departmentId: '',
+      allowRetroactive: false,
+      retroactiveStart: '',
+      retroactiveEnd: ''
     })
     setShowAdd(false)
     setEditingId(null)
-    load()
+    onDataChange()
   }
 
   const handleEdit = (emp) => {
@@ -517,7 +543,7 @@ function EmployeeManager({ employees, departments, onDataChange }) {
   const handleDelete = async (id) => {
     if (confirm('Deseja excluir este funcionário?')) {
       await db.employees.delete(id)
-      load()
+      onDataChange()
     }
   }
 
@@ -682,6 +708,55 @@ function EmployeeManager({ employees, departments, onDataChange }) {
             </div>
           </div>
 
+          <div className="p-6 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-[2.5rem] border border-indigo-500/20 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Inclusão de Dias Anteriores</h4>
+                  <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-widest">Permissão para lançar pontos retroativos</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setNewEmp({ ...newEmp, allowRetroactive: !newEmp.allowRetroactive })}
+                className={`w-12 h-6 rounded-full transition-all relative ${newEmp.allowRetroactive ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-800'}`}
+              >
+                <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${newEmp.allowRetroactive ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+
+            {newEmp.allowRetroactive && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-in zoom-in duration-300">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Inicial Permitida</label>
+                  <input 
+                    type="date" 
+                    className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500" 
+                    value={newEmp.retroactiveStart || ''} 
+                    onChange={e => setNewEmp({ ...newEmp, retroactiveStart: e.target.value })} 
+                    required={newEmp.allowRetroactive}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Final Permitida</label>
+                  <input 
+                    type="date" 
+                    className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500" 
+                    value={newEmp.retroactiveEnd || ''} 
+                    onChange={e => setNewEmp({ ...newEmp, retroactiveEnd: e.target.value })} 
+                    required={newEmp.allowRetroactive}
+                  />
+                </div>
+                <p className="sm:col-span-2 text-[10px] text-slate-500 font-medium italic">
+                  O colaborador terá permissão de lançar os pontos desse período pelo terminal, e as batidas irão para a Central de Aprovações do Administrador.
+                </p>
+              </div>
+            )}
+          </div>
+
           {showDeptCrud && (
             <div className="p-8 bg-slate-50 dark:bg-black/60 rounded-[2.5rem] border border-black/5 dark:border-white/5 space-y-6 animate-in zoom-in duration-300">
               <div className="flex justify-between items-center">
@@ -757,6 +832,12 @@ function EmployeeManager({ employees, departments, onDataChange }) {
                         <ShieldAlert className="w-3 h-3 text-slate-400" />
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Acesso PIN: <span className="text-slate-900 dark:text-white">{emp.pin}</span></span>
                       </div>
+                      {emp.allowRetroactive && emp.retroactiveStart && emp.retroactiveEnd && (
+                        <div className="mt-3 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center space-x-2 text-indigo-600 dark:text-indigo-400 text-[9px] font-black uppercase tracking-wider">
+                          <Calendar className="w-3 h-3 shrink-0" />
+                          <span>Retroativo: {format(new Date(emp.retroactiveStart + 'T12:00:00'), 'dd/MM')} a {format(new Date(emp.retroactiveEnd + 'T12:00:00'), 'dd/MM')}</span>
+                        </div>
+                      )}
                     </div>
                     
                     <div className="flex items-center gap-2 pt-6 border-t border-black/5 dark:border-white/5">
@@ -806,7 +887,7 @@ function ReportsManager({ employees, departments, onDataChange }) {
   }, [filter])
 
   const calculateTotalTime = (empRecords) => {
-    const sorted = [...empRecords].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
+    const sorted = [...empRecords].filter(r => r.status !== 'rejected').sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
     let totalMs = 0
     let isWorking = false
     let lastStart = null
@@ -951,7 +1032,7 @@ function ReportsManager({ employees, departments, onDataChange }) {
         if (!isWeekend && !holiday) totalExpectedMin += dailyExpectedMin
       }
 
-      records.forEach(r => {
+      records.filter(r => r.status !== 'rejected').forEach(r => {
         const date = format(new Date(r.timestamp), 'dd/MM/yyyy')
         if (dailyData[date]) {
           const time = format(new Date(r.timestamp), 'HH:mm')
@@ -2134,23 +2215,33 @@ function ApprovalsManager({ onAction }) {
   const [pendencies, setPendencies] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState('pending') // 'pending' or 'all'
+  const [categoryFilter, setCategoryFilter] = useState('all') // 'all', 'esquecimento', 'retroactive_day', 'medico'
+  const [selectedPhoto, setSelectedPhoto] = useState(null)
 
   useEffect(() => {
     loadPendencies()
-  }, [filter])
+  }, [filter, categoryFilter])
 
   const loadPendencies = async () => {
     try {
       setIsLoading(true)
-      let query = db.records.where('category').equals('medico')
+      const allRecords = await db.records.toArray()
       
-      const records = await query.toArray()
-      const filtered = filter === 'pending' 
-        ? records.filter(r => r.status === 'pending')
-        : records
+      let relevant = allRecords.filter(r => 
+        ['pending', 'approved', 'rejected'].includes(r.status) &&
+        ['medico', 'esquecimento', 'retroactive_day'].includes(r.category)
+      )
+
+      if (filter === 'pending') {
+        relevant = relevant.filter(r => r.status === 'pending')
+      }
+
+      if (categoryFilter !== 'all') {
+        relevant = relevant.filter(r => r.category === categoryFilter)
+      }
         
       const emps = await db.employees.toArray()
-      setPendencies(filtered.map(r => ({
+      setPendencies(relevant.map(r => ({
         ...r,
         employeeName: emps.find(e => e.id === r.employeeId)?.name || 'Desconhecido'
       })).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)))
@@ -2161,8 +2252,32 @@ function ApprovalsManager({ onAction }) {
     }
   }
 
-  const handleAction = async (id, status) => {
-    await db.records.update(id, { status })
+  const handleAction = async (record, status) => {
+    if (status === 'approved') {
+      if (record.category === 'esquecimento' && record.declaredTime) {
+        const [h, m] = record.declaredTime.split(':').map(Number)
+        const targetDate = new Date(record.systemTimestamp || record.timestamp)
+        targetDate.setHours(h, m, 0, 0)
+        await db.records.update(record.id, { 
+          status: 'approved',
+          timestamp: targetDate.toISOString(),
+          approvedAt: new Date().toISOString(),
+          approvedBy: 'admin'
+        })
+      } else {
+        await db.records.update(record.id, { 
+          status: 'approved',
+          approvedAt: new Date().toISOString(),
+          approvedBy: 'admin'
+        })
+      }
+    } else {
+      await db.records.update(record.id, { 
+        status: 'rejected',
+        approvedAt: new Date().toISOString(),
+        approvedBy: 'admin'
+      })
+    }
     loadPendencies()
     onAction()
   }
@@ -2177,22 +2292,45 @@ function ApprovalsManager({ onAction }) {
             <ShieldCheck className="w-8 h-8 mr-3 text-blue-600" />
             Central de Aprovações
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Valide atestados e justificativas médicas da equipe.</p>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">
+            Valide solicitações de pontos esquecidos, inclusões de dias anteriores e atestados médicos.
+          </p>
         </div>
         
-        <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm">
-          <button 
-            onClick={() => setFilter('pending')}
-            className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'pending' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
-          >
-            Pendentes
-          </button>
-          <button 
-            onClick={() => setFilter('all')}
-            className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'all' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
-          >
-            Histórico
-          </button>
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Category Filter */}
+          <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm">
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'esquecimento', label: 'Esquecidos' },
+              { id: 'retroactive_day', label: 'Dias Anteriores' },
+              { id: 'medico', label: 'Atestados' }
+            ].map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => setCategoryFilter(cat.id)}
+                className={`px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-[0.1em] transition-all ${categoryFilter === cat.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white'}`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Status Filter */}
+          <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm">
+            <button 
+              onClick={() => setFilter('pending')}
+              className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'pending' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+            >
+              Pendentes
+            </button>
+            <button 
+              onClick={() => setFilter('all')}
+              className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'all' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
+            >
+              Histórico
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2209,51 +2347,162 @@ function ApprovalsManager({ onAction }) {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
           {pendencies.map((p, i) => (
-            <div key={p.id} className={`bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[2.5rem] p-8 space-y-8 shadow-sm hover:shadow-xl transition-all animate-in fade-in slide-in-from-bottom-4 ${p.status === 'rejected' ? 'opacity-60 grayscale-[0.2]' : ''}`} style={{ animationDelay: `${i * 50}ms` }}>
-              <div className="flex justify-between items-start">
+            <div key={p.id} className={`bg-white dark:bg-slate-900 border border-black/5 dark:border-white/10 rounded-[2.5rem] p-8 space-y-6 shadow-sm hover:shadow-xl transition-all animate-in fade-in slide-in-from-bottom-4 ${p.status === 'rejected' ? 'opacity-60 grayscale-[0.2]' : ''}`} style={{ animationDelay: `${i * 50}ms` }}>
+              
+              {/* Header with Type & Status */}
+              <div className="flex justify-between items-start gap-4">
                 <div className="flex items-center space-x-4">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
-                    p.status === 'pending' ? 'bg-orange-500/10 text-orange-500' :
-                    p.status === 'approved' ? 'bg-emerald-500/10 text-emerald-500' :
-                    'bg-red-500/10 text-red-500'
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${
+                    p.category === 'esquecimento' ? 'bg-orange-500/10 text-orange-500' :
+                    p.category === 'retroactive_day' ? 'bg-indigo-500/10 text-indigo-500' :
+                    'bg-purple-500/10 text-purple-500'
                   }`}>
-                    <Activity className="w-7 h-7" />
+                    {p.category === 'esquecimento' ? <Clock className="w-7 h-7" /> :
+                     p.category === 'retroactive_day' ? <Calendar className="w-7 h-7" /> :
+                     <Activity className="w-7 h-7" />}
                   </div>
                   <div>
-                    <h3 className="font-black text-slate-900 dark:text-white text-lg tracking-tight leading-none">{p.employeeName}</h3>
-                    <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mt-2">{format(new Date(p.timestamp), "dd 'de' MMMM, HH:mm", { locale: ptBR })}</p>
+                    <h3 className="font-black text-slate-900 dark:text-white text-lg tracking-tight leading-tight">{p.employeeName}</h3>
+                    <span className={`inline-block mt-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
+                      p.category === 'esquecimento' ? 'bg-orange-500/10 text-orange-600' :
+                      p.category === 'retroactive_day' ? 'bg-indigo-500/10 text-indigo-600' :
+                      'bg-purple-500/10 text-purple-600'
+                    }`}>
+                      {p.category === 'esquecimento' ? 'Esquecimento de Ponto' :
+                       p.category === 'retroactive_day' ? 'Ponto de Dia Anterior' :
+                       'Atestado Médico'}
+                    </span>
                   </div>
                 </div>
-              </div>
-              
-              <div className="bg-slate-50 dark:bg-black/40 p-6 rounded-3xl border border-black/5 dark:border-white/5">
-                <div className="flex items-center space-x-2 mb-3">
-                  <FileText className="w-4 h-4 text-blue-500" />
-                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Justificativa</p>
-                </div>
-                <p className="text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed italic">"{p.comment || 'Nenhum comentário fornecido.'}"</p>
+
+                <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full shrink-0 ${
+                  p.status === 'pending' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/30' :
+                  p.status === 'approved' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30' :
+                  'bg-red-500/10 text-red-600 border border-red-500/30'
+                }`}>
+                  {p.status === 'pending' ? 'Pendente' : p.status === 'approved' ? 'Deferido' : 'Indeferido'}
+                </span>
               </div>
 
+              {/* Specific Content for Esquecimento (Comparison Box) */}
+              {p.category === 'esquecimento' && (
+                <div className="p-4 bg-orange-50/50 dark:bg-orange-950/20 rounded-2xl border border-orange-500/20 space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">Horário Declarado</span>
+                      <span className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                        {p.declaredTime || format(new Date(p.timestamp), 'HH:mm')}
+                      </span>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-orange-400 mx-2 shrink-0" />
+                    <div className="text-right">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">Batida no Sistema</span>
+                      <span className="text-lg font-bold font-mono text-slate-500">
+                        {format(new Date(p.systemTimestamp || p.timestamp), 'HH:mm')}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                    Data da ocorrência: <strong>{format(new Date(p.systemTimestamp || p.timestamp), "dd 'de' MMMM", { locale: ptBR })}</strong>
+                  </p>
+                </div>
+              )}
+
+              {/* Specific Content for Retroactive Day */}
+              {p.category === 'retroactive_day' && (
+                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-500/20 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">Data e Horário Lançado</span>
+                      <span className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                        {format(new Date(p.timestamp), 'dd/MM/yyyy')} às {format(new Date(p.timestamp), 'HH:mm')}
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-white dark:bg-black/40 rounded-lg text-slate-700 dark:text-slate-300 border border-black/5 dark:border-white/10">
+                      {RECORD_TYPES[p.type]?.label || p.type}
+                    </span>
+                  </div>
+                  {p.systemTimestamp && (
+                    <p className="text-[9px] text-slate-400 font-mono">
+                      Solicitado em: {format(new Date(p.systemTimestamp), "dd/MM/yyyy 'às' HH:mm")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Photo Thumbnail if Available */}
+              {p.photo && (
+                <div className="flex items-center space-x-3 p-3 bg-slate-50 dark:bg-black/40 rounded-2xl border border-black/5 dark:border-white/5">
+                  <div 
+                    onClick={() => setSelectedPhoto(p.photo)}
+                    className="w-14 h-14 rounded-xl overflow-hidden bg-slate-200 dark:bg-slate-800 cursor-pointer hover:opacity-80 transition-opacity border border-black/10 dark:border-white/10 shrink-0 relative group"
+                  >
+                    <img src={p.photo} alt="Comprovante" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Camera className="w-4 h-4 text-white" />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Foto / Comprovante Anexo</p>
+                    <p className="text-[10px] text-slate-400">Clique na miniatura para ampliar</p>
+                  </div>
+                </div>
+              )}
+              
+              {/* Justification Comment */}
+              <div className="bg-slate-50 dark:bg-black/40 p-5 rounded-2xl border border-black/5 dark:border-white/5">
+                <div className="flex items-center space-x-2 mb-2">
+                  <FileText className="w-3.5 h-3.5 text-blue-500" />
+                  <p className="text-[9px] text-slate-400 uppercase font-black tracking-widest">Justificativa</p>
+                </div>
+                <p className="text-xs text-slate-700 dark:text-slate-200 font-medium leading-relaxed italic break-words">
+                  "{p.comment || 'Nenhum comentário fornecido.'}"
+                </p>
+              </div>
+
+              {/* Action Buttons */}
               <div className="flex gap-3 pt-2">
                 {p.status !== 'approved' && (
                   <button 
-                    onClick={() => handleAction(p.id, 'approved')}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+                    onClick={() => handleAction(p, 'approved')}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20 active:scale-[0.98] flex items-center justify-center space-x-1.5"
                   >
-                    Aprovar
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Deferir (Aprovar)</span>
                   </button>
                 )}
                 {p.status !== 'rejected' && (
                   <button 
-                    onClick={() => handleAction(p.id, 'rejected')}
-                    className="flex-1 bg-red-600/10 hover:bg-red-600/20 text-red-600 py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-[0.98]"
+                    onClick={() => handleAction(p, 'rejected')}
+                    className="flex-1 bg-red-600/10 hover:bg-red-600/20 text-red-600 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-[0.98] flex items-center justify-center space-x-1.5"
                   >
-                    {p.status === 'pending' ? 'Recusar' : 'Reverter'}
+                    <X className="w-3.5 h-3.5" />
+                    <span>{p.status === 'pending' ? 'Indeferir (Recusar)' : 'Reverter'}</span>
                   </button>
                 )}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Photo Preview Modal */}
+      {selectedPhoto && (
+        <div 
+          className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <div className="relative max-w-md w-full bg-slate-900 rounded-[2.5rem] p-6 border border-white/10 shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center">
+              <h4 className="text-xs font-black text-white uppercase tracking-widest">Visualização da Captura</h4>
+              <button onClick={() => setSelectedPhoto(null)} className="p-2 text-slate-400 hover:text-white rounded-xl">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="rounded-2xl overflow-hidden aspect-square border border-white/10 bg-black">
+              <img src={selectedPhoto} alt="Ampliada" className="w-full h-full object-contain" />
+            </div>
+          </div>
         </div>
       )}
     </div>

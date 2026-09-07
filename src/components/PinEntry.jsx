@@ -120,6 +120,11 @@ export function PinEntry() {
           const rDateStr = format(new Date(r.timestamp), 'yyyy-MM-dd')
           return rDateStr === dateStr && r.status !== 'rejected'
         })
+        existingOnDay.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+
+        const existingSummary = existingOnDay
+          .map(r => `${RECORD_TYPES[r.type]?.label || r.type} (${format(new Date(r.timestamp), 'HH:mm')})`)
+          .join(', ')
 
         // Seleciona automaticamente dias úteis sem registros já cadastrados
         const isAutoSelected = dayWork.isWorkDay && existingOnDay.length === 0
@@ -133,6 +138,7 @@ export function PinEntry() {
           isWorkDay: dayWork.isWorkDay,
           workDayLabel: dayWork.label || (dayWork.isWorkDay ? 'Dia Útil' : 'Folga'),
           existingCount: existingOnDay.length,
+          existingSummary,
           selected: isAutoSelected,
           hasLunch: true,
           checkIn: sIn,
@@ -583,6 +589,54 @@ export function PinEntry() {
       const [hour, minute] = retroDayTime.split(':').map(Number)
       const targetDateTime = new Date(year, month - 1, day, hour, minute, 0, 0)
 
+      // VALIDAÇÃO ANTI-DUPLICIDADE: Verifica se já existe batida nesta data para o colaborador
+      const existingEmpRecords = await db.records
+        .where('employeeId')
+        .equals(Number(employee.id))
+        .toArray()
+
+      const nonRejected = existingEmpRecords.filter(r => {
+        if (r.status === 'rejected') return false
+        const recDate = format(new Date(r.timestamp), 'yyyy-MM-dd')
+        return recDate === retroDayDate
+      })
+
+      // 1. Bloqueio por Horário Idêntico (mesmo minuto)
+      const exactTimeMatch = nonRejected.find(r => {
+        const recTime = format(new Date(r.timestamp), 'HH:mm')
+        return recTime === retroDayTime
+      })
+
+      if (exactTimeMatch) {
+        const typeLabel = RECORD_TYPES[exactTimeMatch.type]?.label || exactTimeMatch.type
+        const isPending = exactTimeMatch.status === 'pending'
+        showFeedback({
+          type: 'warning',
+          title: 'Ponto Já Registrado',
+          message: `Já existe uma marcação de "${typeLabel}" ${isPending ? 'pendente de aprovação' : 'já registrada'} exatamente às ${retroDayTime} no dia ${format(new Date(retroDayDate + 'T12:00:00'), 'dd/MM/yyyy')}. Para evitar duplicidade na folha, ajuste o horário ou consulte seu extrato.`
+        })
+        setIsSubmittingRetro(false)
+        return
+      }
+
+      // 2. Bloqueio por Tipo Principal Duplicado no mesmo dia (check_in, lunch_out, lunch_in, check_out)
+      const primaryPunchTypes = ['check_in', 'lunch_out', 'lunch_in', 'check_out']
+      if (primaryPunchTypes.includes(retroDayType)) {
+        const sameTypeMatch = nonRejected.find(r => r.type === retroDayType)
+        if (sameTypeMatch) {
+          const recTime = format(new Date(sameTypeMatch.timestamp), 'HH:mm')
+          const isPending = sameTypeMatch.status === 'pending'
+          const typeLabel = RECORD_TYPES[retroDayType]?.label || retroDayType
+          showFeedback({
+            type: 'warning',
+            title: 'Marcação Duplicada',
+            message: `O dia ${format(new Date(retroDayDate + 'T12:00:00'), 'dd/MM/yyyy')} já possui uma "${typeLabel}" ${isPending ? 'pendente de aprovação' : 'registrada'} às ${recTime}. Não é permitido lançar duas vezes o mesmo tipo de marcação no mesmo dia. Se precisar lançar horários extras, utilize as opções "Retorno Extra" ou "Saída Extra".`
+          })
+          setIsSubmittingRetro(false)
+          return
+        }
+      }
+
       const recId = await db.records.add({
         employeeId: employee.id,
         timestamp: targetDateTime.toISOString(),
@@ -661,20 +715,29 @@ export function PinEntry() {
 
     setIsSubmittingRetroBatch(true)
     try {
+      // Carrega registros existentes no banco para filtrar e prevenir duplicatas
+      const allEmpRecords = await db.records
+        .where('employeeId')
+        .equals(Number(employee.id))
+        .toArray()
+
+      const nonRejected = allEmpRecords.filter(r => r.status !== 'rejected')
+      const primaryPunchTypes = ['check_in', 'lunch_out', 'lunch_in', 'check_out']
+
       const punchesToCreate = []
+      let skippedDuplicateCount = 0
 
       for (const day of selectedDays) {
         const [year, month, dayNum] = day.dateStr.split('-').map(Number)
+        const candidates = []
 
         // 1. Entrada Principal
         if (day.checkIn) {
           const [h, m] = day.checkIn.split(':').map(Number)
-          const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
-          punchesToCreate.push({
+          candidates.push({
             type: 'check_in',
-            timestamp: dt.toISOString(),
-            dateDisplay: day.fullDateDisplay,
-            timeDisplay: day.checkIn
+            time: day.checkIn,
+            dt: new Date(year, month - 1, dayNum, h, m, 0, 0)
           })
         }
 
@@ -682,22 +745,18 @@ export function PinEntry() {
         if (day.hasLunch) {
           if (day.lunchOut) {
             const [h, m] = day.lunchOut.split(':').map(Number)
-            const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
-            punchesToCreate.push({
+            candidates.push({
               type: 'lunch_out',
-              timestamp: dt.toISOString(),
-              dateDisplay: day.fullDateDisplay,
-              timeDisplay: day.lunchOut
+              time: day.lunchOut,
+              dt: new Date(year, month - 1, dayNum, h, m, 0, 0)
             })
           }
           if (day.lunchIn) {
             const [h, m] = day.lunchIn.split(':').map(Number)
-            const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
-            punchesToCreate.push({
+            candidates.push({
               type: 'lunch_in',
-              timestamp: dt.toISOString(),
-              dateDisplay: day.fullDateDisplay,
-              timeDisplay: day.lunchIn
+              time: day.lunchIn,
+              dt: new Date(year, month - 1, dayNum, h, m, 0, 0)
             })
           }
         }
@@ -705,22 +764,49 @@ export function PinEntry() {
         // 3. Saída Definitiva
         if (day.checkOut) {
           const [h, m] = day.checkOut.split(':').map(Number)
-          const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
-          punchesToCreate.push({
+          candidates.push({
             type: 'check_out',
-            timestamp: dt.toISOString(),
-            dateDisplay: day.fullDateDisplay,
-            timeDisplay: day.checkOut
+            time: day.checkOut,
+            dt: new Date(year, month - 1, dayNum, h, m, 0, 0)
           })
+        }
+
+        // Filtra contra batidas já existentes no mesmo dia
+        for (const cand of candidates) {
+          const isDuplicate = nonRejected.some(existing => {
+            const recDate = format(new Date(existing.timestamp), 'yyyy-MM-dd')
+            if (recDate !== day.dateStr) return false
+            const recTime = format(new Date(existing.timestamp), 'HH:mm')
+            return recTime === cand.time || (primaryPunchTypes.includes(cand.type) && existing.type === cand.type)
+          })
+
+          if (isDuplicate) {
+            skippedDuplicateCount++
+          } else {
+            punchesToCreate.push({
+              type: cand.type,
+              timestamp: cand.dt.toISOString(),
+              dateDisplay: day.fullDateDisplay,
+              timeDisplay: cand.time
+            })
+          }
         }
       }
 
       if (punchesToCreate.length === 0) {
-        showFeedback({
-          type: 'warning',
-          title: 'Horários Ausentes',
-          message: 'Informe os horários dos dias selecionados para continuar.'
-        })
+        if (skippedDuplicateCount > 0) {
+          showFeedback({
+            type: 'warning',
+            title: 'Batidas Já Existentes',
+            message: 'Todas as batidas configuradas para os dias selecionados já constam como registradas ou pendentes de aprovação no sistema. Nenhuma solicitação duplicada foi gerada.'
+          })
+        } else {
+          showFeedback({
+            type: 'warning',
+            title: 'Horários Ausentes',
+            message: 'Informe os horários dos dias selecionados para continuar.'
+          })
+        }
         setIsSubmittingRetroBatch(false)
         return
       }
@@ -747,7 +833,7 @@ export function PinEntry() {
       const notifData = {
         target: 'admin',
         type: 'retroactive',
-        message: `${employee.name} lançou preenchimento retroativo em lote para ${selectedDays.length} dia(s) (${punchesToCreate.length} batidas) de ${format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')} a ${format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}. Aguarda deferimento.`,
+        message: `${employee.name} lançou preenchimento retroativo em lote para ${selectedDays.length} dia(s) (${punchesToCreate.length} batidas novas) de ${format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')} a ${format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}. Aguarda deferimento.`,
         timestamp: nowIso,
         read: false,
         employeeId: employee.id
@@ -761,7 +847,7 @@ export function PinEntry() {
       showFeedback({
         type: 'success',
         title: 'Período Enviado com Sucesso',
-        message: `${punchesToCreate.length} marcações de ponto distribuídas em ${selectedDays.length} dia(s) foram enviadas com sucesso para a aprovação do Administrador!`,
+        message: `${punchesToCreate.length} nova(s) marcação(ões) de ponto enviada(s) para aprovação do Administrador!${skippedDuplicateCount > 0 ? ` (${skippedDuplicateCount} batida(s) foram ignoradas automaticamente pois já estavam registradas no sistema).` : ''}`,
         onConfirm: () => {
           setRetroBatchReason('')
           setStep('select')
@@ -2102,6 +2188,11 @@ export function PinEntry() {
                                   </span>
                                 )}
                               </div>
+                              {day.existingCount > 0 && (
+                                <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300 mt-1">
+                                  Já no espelho: {day.existingSummary}
+                                </p>
+                              )}
                             </div>
                           </label>
 

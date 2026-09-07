@@ -75,6 +75,13 @@ export function PinEntry() {
   // Saldo de Banco de Horas em Tempo Real
   const [timeBank, setTimeBank] = useState(null)
 
+  // Popup / Modal de Feedback do Sistema (substitui alerts nativos do navegador)
+  const [feedbackModal, setFeedbackModal] = useState(null)
+
+  const showFeedback = ({ type = 'info', title, message, onConfirm }) => {
+    setFeedbackModal({ type, title, message, onConfirm })
+  }
+
   useEffect(() => {
     const unsub = subscribeAutoPunchStatus((data) => {
       if (data && employeeId && String(data.employeeId) === String(employeeId)) {
@@ -197,7 +204,11 @@ export function PinEntry() {
       }
     } else {
       await navigator.clipboard.writeText(text)
-      alert('Comprovante copiado! Você pode colar no seu WhatsApp ou Bloco de Notas.')
+      showFeedback({
+        type: 'success',
+        title: 'Comprovante Copiado',
+        message: 'Comprovante copiado para a área de transferência! Você pode colar no WhatsApp ou bloco de notas.'
+      })
     }
   }
 
@@ -273,7 +284,11 @@ export function PinEntry() {
       .toArray()
       
     if (records.length === 0) {
-      alert('Nenhum registro encontrado neste período.')
+      showFeedback({
+        type: 'info',
+        title: 'Sem Registros',
+        message: 'Nenhum registro de ponto foi encontrado para o período selecionado.'
+      })
       return
     }
     
@@ -328,7 +343,11 @@ export function PinEntry() {
         link.click()
       } catch (err) {
         console.error('Failed to capture ticket', err)
-        alert('Erro ao gerar imagem do comprovante.')
+        showFeedback({
+          type: 'error',
+          title: 'Erro ao Baixar',
+          message: 'Não foi possível gerar a imagem do comprovante. Tente novamente.'
+        })
       }
     }
   }
@@ -402,7 +421,11 @@ export function PinEntry() {
 
   const handleStartForgottenRecord = () => {
     if (!forgottenTime) {
-      alert('Por favor, informe o horário em que você realmente chegou.')
+      showFeedback({
+        type: 'warning',
+        title: 'Horário Obrigatório',
+        message: 'Por favor, informe o horário em que você realmente chegou.'
+      })
       return
     }
     setSelectedType(forgottenType)
@@ -415,15 +438,27 @@ export function PinEntry() {
   const handleSaveRetroDay = async (e) => {
     e.preventDefault()
     if (!retroDayDate || !retroDayTime) {
-      alert('Por favor, informe a data e o horário.')
+      showFeedback({
+        type: 'warning',
+        title: 'Campos Obrigatórios',
+        message: 'Por favor, informe a data e o horário do ponto.'
+      })
       return
     }
     if (employee?.retroactiveStart && retroDayDate < employee.retroactiveStart) {
-      alert(`A data não pode ser anterior ao início autorizado (${format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')}).`)
+      showFeedback({
+        type: 'warning',
+        title: 'Data Inválida',
+        message: `A data não pode ser anterior ao início autorizado (${format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')}).`
+      })
       return
     }
     if (employee?.retroactiveEnd && retroDayDate > employee.retroactiveEnd) {
-      alert(`A data não pode ser posterior ao fim autorizado (${format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}).`)
+      showFeedback({
+        type: 'warning',
+        title: 'Data Inválida',
+        message: `A data não pode ser posterior ao fim autorizado (${format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}).`
+      })
       return
     }
 
@@ -473,12 +508,25 @@ export function PinEntry() {
         employeeId: employee.id
       })
 
-      alert('Ponto retroativo enviado com sucesso para a aprovação do Administrador!')
-      setRetroDayReason('')
-      setStep('select')
+      loadTimeBank()
+      loadTodayRecords()
+
+      showFeedback({
+        type: 'success',
+        title: 'Ponto Enviado com Sucesso',
+        message: 'Ponto retroativo enviado com sucesso para a aprovação do Administrador!',
+        onConfirm: () => {
+          setRetroDayReason('')
+          setStep('select')
+        }
+      })
     } catch (err) {
       console.error(err)
-      alert('Erro ao enviar ponto retroativo.')
+      showFeedback({
+        type: 'error',
+        title: 'Erro de Envio',
+        message: 'Ocorreu um erro ao enviar o ponto retroativo. Tente novamente.'
+      })
     } finally {
       setIsSubmittingRetro(false)
     }
@@ -643,7 +691,11 @@ export function PinEntry() {
       if (settings?.geofenceEnabled && settings.geofenceLat && settings.geofenceLng) {
         const dist = getDistance(userLat, userLng, parseFloat(settings.geofenceLat), parseFloat(settings.geofenceLng))
         if (dist > (parseFloat(settings.geofenceRadius) || 50)) {
-          alert(`Acesso bloqueado: Você está fora da área permitida da empresa (Distância: ${Math.round(dist)}m).`)
+          showFeedback({
+            type: 'error',
+            title: 'Acesso Bloqueado por Cerca Virtual',
+            message: `Você está fora da área permitida da empresa (Distância: ${Math.round(dist)}m). Aproxime-se do local de trabalho.`
+          })
           setIsProcessing(false)
           setStep('select')
           return
@@ -657,7 +709,11 @@ export function PinEntry() {
         handleGeolocation,
         (err) => {
           if (settings?.geofenceEnabled) {
-            alert('Acesso ao GPS negado. Você precisa permitir a localização para bater o ponto com Cerca Virtual.')
+            showFeedback({
+              type: 'warning',
+              title: 'Acesso ao GPS Negado',
+              message: 'Você precisa permitir a localização no navegador para registrar o ponto com a Cerca Virtual ativada.'
+            })
             setIsProcessing(false)
             setStep('select')
             return
@@ -668,7 +724,11 @@ export function PinEntry() {
       )
     } else {
       if (settings?.geofenceEnabled) {
-        alert('Seu dispositivo não suporta GPS. Não é possível bater o ponto com Cerca Virtual.')
+        showFeedback({
+          type: 'error',
+          title: 'GPS Indisponível',
+          message: 'Seu dispositivo não suporta GPS. Não é possível bater o ponto com Cerca Virtual.'
+        })
         setIsProcessing(false)
         setStep('select')
         return
@@ -1895,6 +1955,50 @@ export function PinEntry() {
               className="w-full py-4 text-slate-500 hover:text-slate-900 dark:text-white text-xs font-bold uppercase tracking-widest transition-colors"
             >
               Voltar ao Histórico
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Feedback Customizado do Sistema (substitui alerts nativos do navegador) */}
+      {feedbackModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border border-slate-200/80 dark:border-white/10 p-6 md:p-8 rounded-[2.5rem] shadow-2xl max-w-sm w-full text-center space-y-5 transform transition-all animate-in zoom-in-95 duration-200">
+            <div className="flex justify-center">
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center border shadow-lg ${
+                feedbackModal.type === 'success'
+                  ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20 shadow-emerald-500/10'
+                  : feedbackModal.type === 'warning'
+                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/20 shadow-amber-500/10'
+                  : feedbackModal.type === 'error'
+                  ? 'bg-rose-500/10 text-rose-500 border-rose-500/20 shadow-rose-500/10'
+                  : 'bg-blue-500/10 text-blue-500 border-blue-500/20 shadow-blue-500/10'
+              }`}>
+                {feedbackModal.type === 'success' && <CheckCircle2 className="w-8 h-8" />}
+                {feedbackModal.type === 'warning' && <ShieldAlert className="w-8 h-8" />}
+                {feedbackModal.type === 'error' && <AlertCircle className="w-8 h-8" />}
+                {feedbackModal.type === 'info' && <Info className="w-8 h-8" />}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-base md:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                {feedbackModal.title || 'Aviso do Sistema'}
+              </h3>
+              <p className="text-xs md:text-sm font-medium text-slate-600 dark:text-slate-300 leading-relaxed">
+                {feedbackModal.message}
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                const cb = feedbackModal.onConfirm
+                setFeedbackModal(null)
+                if (cb) cb()
+              }}
+              className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-blue-500/25 active:scale-[0.98] transition-all text-xs uppercase tracking-widest"
+            >
+              Entendido
             </button>
           </div>
         </div>

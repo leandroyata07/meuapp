@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin, Scale, TrendingUp, TrendingDown } from 'lucide-react'
-import { format, startOfMonth } from 'date-fns'
+import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin, Scale, TrendingUp, TrendingDown, Sparkles, CheckSquare, Square, Layers, ListChecks, Copy } from 'lucide-react'
+import { format, startOfMonth, eachDayOfInterval, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
 import { QRCodeSVG } from 'qrcode.react'
 import { ThemeToggle } from './ThemeToggle'
-import { toMinutes } from '../utils/shiftUtils'
+import { toMinutes, checkEmployeeWorkDay } from '../utils/shiftUtils'
 import { pushDocToFirestore } from '../firebase'
 import { subscribeAutoPunchStatus } from '../services/autoPunchService'
 import { calculateEmployeeMonthBalance } from '../utils/timeBankUtils'
@@ -63,11 +63,123 @@ export function PinEntry() {
   const [forgottenReason, setForgottenReason] = useState('')
 
   // Inclusão de Pontos de Dias Anteriores (quando autorizado)
+  const [retroMode, setRetroMode] = useState('batch') // 'batch' | 'single'
   const [retroDayDate, setRetroDayDate] = useState('')
   const [retroDayType, setRetroDayType] = useState('check_in')
   const [retroDayTime, setRetroDayTime] = useState('08:00')
   const [retroDayReason, setRetroDayReason] = useState('')
   const [isSubmittingRetro, setIsSubmittingRetro] = useState(false)
+
+  // Modelo Padrão de Horários para o Período Completo (Lote)
+  const [templateIn, setTemplateIn] = useState('08:00')
+  const [templateLunchOut, setTemplateLunchOut] = useState('12:00')
+  const [templateLunchIn, setTemplateLunchIn] = useState('13:00')
+  const [templateOut, setTemplateOut] = useState('17:00')
+  const [templateHasLunch, setTemplateHasLunch] = useState(true)
+
+  // Lista de dias gerada no intervalo autorizado
+  const [retroDaysList, setRetroDaysList] = useState([])
+  const [retroBatchReason, setRetroBatchReason] = useState('')
+  const [isSubmittingRetroBatch, setIsSubmittingRetroBatch] = useState(false)
+  const [isLoadingRetroDays, setIsLoadingRetroDays] = useState(false)
+
+  const initRetroDays = async (emp = employee) => {
+    if (!emp?.retroactiveStart || !emp?.retroactiveEnd) return
+    setIsLoadingRetroDays(true)
+    try {
+      const start = parseISO(emp.retroactiveStart)
+      const end = parseISO(emp.retroactiveEnd)
+      if (start > end) return
+
+      const days = eachDayOfInterval({ start, end })
+
+      // Carrega registros existentes no período para não gerar pontos duplicados
+      const existingRecords = await db.records
+        .where('employeeId')
+        .equals(Number(emp.id))
+        .toArray()
+
+      const sIn = emp.shiftStart || '08:00'
+      const sLunchOut = emp.lunchStart || '12:00'
+      const sLunchIn = emp.lunchEnd || '13:00'
+      const sOut = emp.shiftEnd || '17:00'
+
+      setTemplateIn(sIn)
+      setTemplateLunchOut(sLunchOut)
+      setTemplateLunchIn(sLunchIn)
+      setTemplateOut(sOut)
+
+      const list = days.map(d => {
+        const dateStr = format(d, 'yyyy-MM-dd')
+        const dayWork = checkEmployeeWorkDay(emp, d)
+        const dayName = format(d, 'EEEE', { locale: ptBR })
+        const shortDate = format(d, 'dd/MM')
+
+        // Verifica quantos registros já existem nesta data (excluindo rejeitados)
+        const existingOnDay = existingRecords.filter(r => {
+          const rDateStr = format(new Date(r.timestamp), 'yyyy-MM-dd')
+          return rDateStr === dateStr && r.status !== 'rejected'
+        })
+
+        // Seleciona automaticamente dias úteis sem registros já cadastrados
+        const isAutoSelected = dayWork.isWorkDay && existingOnDay.length === 0
+
+        return {
+          dateStr,
+          dateObj: d,
+          dayName: dayName.charAt(0).toUpperCase() + dayName.slice(1),
+          shortDate,
+          fullDateDisplay: format(d, 'dd/MM/yyyy'),
+          isWorkDay: dayWork.isWorkDay,
+          workDayLabel: dayWork.label || (dayWork.isWorkDay ? 'Dia Útil' : 'Folga'),
+          existingCount: existingOnDay.length,
+          selected: isAutoSelected,
+          hasLunch: true,
+          checkIn: sIn,
+          lunchOut: sLunchOut,
+          lunchIn: sLunchIn,
+          checkOut: sOut
+        }
+      })
+
+      setRetroDaysList(list)
+    } catch (err) {
+      console.error('Erro ao inicializar dias retroativos:', err)
+    } finally {
+      setIsLoadingRetroDays(false)
+    }
+  }
+
+  const handleApplyTemplateToAll = () => {
+    setRetroDaysList(prev => prev.map(day => ({
+      ...day,
+      checkIn: templateIn,
+      lunchOut: templateLunchOut,
+      lunchIn: templateLunchIn,
+      checkOut: templateOut,
+      hasLunch: templateHasLunch
+    })))
+  }
+
+  const handleToggleDay = (dateStr) => {
+    setRetroDaysList(prev => prev.map(d => d.dateStr === dateStr ? { ...d, selected: !d.selected } : d))
+  }
+
+  const handleUpdateDayField = (dateStr, field, value) => {
+    setRetroDaysList(prev => prev.map(d => d.dateStr === dateStr ? { ...d, [field]: value } : d))
+  }
+
+  const handleSelectAllWorkDays = () => {
+    setRetroDaysList(prev => prev.map(d => ({ ...d, selected: d.isWorkDay })))
+  }
+
+  const handleSelectAllDays = () => {
+    setRetroDaysList(prev => prev.map(d => ({ ...d, selected: true })))
+  }
+
+  const handleDeselectAll = () => {
+    setRetroDaysList(prev => prev.map(d => ({ ...d, selected: false })))
+  }
 
   // Telemetria de Auto-Ponto por Geofencing (GPS)
   const [autoPunchTelemetry, setAutoPunchTelemetry] = useState(null)
@@ -133,6 +245,9 @@ export function PinEntry() {
       if (emp?.cpf === '000.000.000-00') setIsDemo(true)
       if (emp?.allowRetroactive && emp?.retroactiveStart) {
         setRetroDayDate(emp.retroactiveStart)
+        if (emp?.retroactiveEnd) {
+          initRetroDays(emp)
+        }
       }
       if (sessionStorage.getItem('biometricVerified') === String(employeeId)) {
         sessionStorage.removeItem('biometricVerified')
@@ -529,6 +644,138 @@ export function PinEntry() {
       })
     } finally {
       setIsSubmittingRetro(false)
+    }
+  }
+
+  const handleSaveRetroBatch = async (e) => {
+    if (e) e.preventDefault()
+    const selectedDays = retroDaysList.filter(d => d.selected)
+    if (selectedDays.length === 0) {
+      showFeedback({
+        type: 'warning',
+        title: 'Nenhum Dia Selecionado',
+        message: 'Por favor, selecione ao menos um dia no período para realizar o lançamento.'
+      })
+      return
+    }
+
+    setIsSubmittingRetroBatch(true)
+    try {
+      const punchesToCreate = []
+
+      for (const day of selectedDays) {
+        const [year, month, dayNum] = day.dateStr.split('-').map(Number)
+
+        // 1. Entrada Principal
+        if (day.checkIn) {
+          const [h, m] = day.checkIn.split(':').map(Number)
+          const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
+          punchesToCreate.push({
+            type: 'check_in',
+            timestamp: dt.toISOString(),
+            dateDisplay: day.fullDateDisplay,
+            timeDisplay: day.checkIn
+          })
+        }
+
+        // 2. Almoço (se habilitado para este dia)
+        if (day.hasLunch) {
+          if (day.lunchOut) {
+            const [h, m] = day.lunchOut.split(':').map(Number)
+            const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
+            punchesToCreate.push({
+              type: 'lunch_out',
+              timestamp: dt.toISOString(),
+              dateDisplay: day.fullDateDisplay,
+              timeDisplay: day.lunchOut
+            })
+          }
+          if (day.lunchIn) {
+            const [h, m] = day.lunchIn.split(':').map(Number)
+            const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
+            punchesToCreate.push({
+              type: 'lunch_in',
+              timestamp: dt.toISOString(),
+              dateDisplay: day.fullDateDisplay,
+              timeDisplay: day.lunchIn
+            })
+          }
+        }
+
+        // 3. Saída Definitiva
+        if (day.checkOut) {
+          const [h, m] = day.checkOut.split(':').map(Number)
+          const dt = new Date(year, month - 1, dayNum, h, m, 0, 0)
+          punchesToCreate.push({
+            type: 'check_out',
+            timestamp: dt.toISOString(),
+            dateDisplay: day.fullDateDisplay,
+            timeDisplay: day.checkOut
+          })
+        }
+      }
+
+      if (punchesToCreate.length === 0) {
+        showFeedback({
+          type: 'warning',
+          title: 'Horários Ausentes',
+          message: 'Informe os horários dos dias selecionados para continuar.'
+        })
+        setIsSubmittingRetroBatch(false)
+        return
+      }
+
+      const nowIso = new Date().toISOString()
+      const reasonText = retroBatchReason.trim() || 'Lançamento retroativo em lote do período autorizado'
+
+      // Salva cada batida no Dexie e envia ao Firestore
+      for (const p of punchesToCreate) {
+        const recordData = {
+          employeeId: employee.id,
+          timestamp: p.timestamp,
+          systemTimestamp: nowIso,
+          type: p.type,
+          comment: `Ponto Retroativo (${reasonText})`,
+          category: 'retroactive_day',
+          status: 'pending'
+        }
+        const recId = await db.records.add(recordData)
+        await pushDocToFirestore('records', recId, { ...recordData, id: recId })
+      }
+
+      // Envia uma única notificação consolidada ao Admin
+      const notifData = {
+        target: 'admin',
+        type: 'retroactive',
+        message: `${employee.name} lançou preenchimento retroativo em lote para ${selectedDays.length} dia(s) (${punchesToCreate.length} batidas) de ${format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy')} a ${format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy')}. Aguarda deferimento.`,
+        timestamp: nowIso,
+        read: false,
+        employeeId: employee.id
+      }
+      const notifId = await db.notifications.add(notifData)
+      await pushDocToFirestore('notifications', notifId, { ...notifData, id: notifId })
+
+      loadTimeBank()
+      loadTodayRecords()
+
+      showFeedback({
+        type: 'success',
+        title: 'Período Enviado com Sucesso',
+        message: `${punchesToCreate.length} marcações de ponto distribuídas em ${selectedDays.length} dia(s) foram enviadas com sucesso para a aprovação do Administrador!`,
+        onConfirm: () => {
+          setRetroBatchReason('')
+          setStep('select')
+        }
+      })
+    } catch (err) {
+      console.error('Erro ao enviar lote retroativo:', err)
+      showFeedback({
+        type: 'error',
+        title: 'Erro de Envio',
+        message: 'Ocorreu um erro ao enviar os pontos retroativos em lote. Tente novamente.'
+      })
+    } finally {
+      setIsSubmittingRetroBatch(false)
     }
   }
 
@@ -1608,7 +1855,7 @@ export function PinEntry() {
       )}
 
       {step === 'retroactive_day' && (
-        <div className="w-full max-w-lg space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="w-full max-w-3xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
           <button 
             onClick={() => setStep('select')}
             className="flex items-center space-x-2 text-slate-500 hover:text-slate-900 dark:text-white transition-colors text-sm font-bold"
@@ -1621,72 +1868,396 @@ export function PinEntry() {
             <div className="w-16 h-16 bg-indigo-600/20 rounded-2xl flex items-center justify-center mx-auto mb-2 text-indigo-500 border border-indigo-500/30">
               <Calendar className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Lançar Ponto de Dias Anteriores</h2>
+            <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+              Lançar Ponto de Dias Anteriores
+            </h2>
             <p className="text-slate-500 dark:text-slate-400 text-sm">
-              Período autorizado pela gestão: <strong className="text-indigo-500">{employee?.retroactiveStart ? format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong> até <strong className="text-indigo-500">{employee?.retroactiveEnd ? format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong>.
+              Período autorizado pela gestão: <strong className="text-indigo-600 dark:text-indigo-400">{employee?.retroactiveStart ? format(new Date(employee.retroactiveStart + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong> até <strong className="text-indigo-600 dark:text-indigo-400">{employee?.retroactiveEnd ? format(new Date(employee.retroactiveEnd + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong>.
             </p>
           </div>
 
-          <form onSubmit={handleSaveRetroDay} className="p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Data do Ponto</label>
-              <input 
-                type="date" 
-                min={employee?.retroactiveStart || undefined}
-                max={employee?.retroactiveEnd || undefined}
-                required
-                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                value={retroDayDate}
-                onChange={e => setRetroDayDate(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Tipo de Marcação</label>
-              <select 
-                value={retroDayType} 
-                onChange={e => setRetroDayType(e.target.value)}
-                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="check_in">Entrada Principal</option>
-                <option value="lunch_out">Saída Refeição (Almoço)</option>
-                <option value="lunch_in">Retorno Refeição (Almoço)</option>
-                <option value="check_out">Saída Definitiva</option>
-                <option value="other_in">Retorno Extra</option>
-                <option value="other_out">Saída Extra</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Horário Real em que Ocorreu</label>
-              <input 
-                type="time" 
-                required
-                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-xl text-center outline-none focus:ring-2 focus:ring-indigo-500"
-                value={retroDayTime}
-                onChange={e => setRetroDayTime(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Justificativa / Motivo</label>
-              <textarea 
-                rows="3"
-                placeholder="Ex: Registro manual em folha física no início das atividades na empresa..."
-                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-medium text-sm outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
-                value={retroDayReason}
-                onChange={e => setRetroDayReason(e.target.value)}
-              />
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={isSubmittingRetro}
-              className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 transition-all active:scale-[0.98] uppercase tracking-widest text-xs flex items-center justify-center space-x-2 disabled:opacity-50"
+          {/* Seletor de Modo: Lote (Período) vs Individual (Avulso) */}
+          <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 max-w-md mx-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setRetroMode('batch')
+                if (retroDaysList.length === 0) initRetroDays(employee)
+              }}
+              className={`py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2 ${
+                retroMode === 'batch'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
             >
-              <span>{isSubmittingRetro ? 'Enviando...' : 'Enviar para Aprovação do Administrador'}</span>
+              <Sparkles className="w-4 h-4" />
+              <span>Período Completo</span>
             </button>
-          </form>
+            <button
+              type="button"
+              onClick={() => setRetroMode('single')}
+              className={`py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2 ${
+                retroMode === 'single'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>Ponto Avulso</span>
+            </button>
+          </div>
+
+          {retroMode === 'batch' ? (
+            <div className="space-y-8">
+              {/* CARD 1: MODELO PADRÃO DA JORNADA */}
+              <div className="p-6 md:p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-black/5 dark:border-white/5">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center font-black">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-900 dark:text-white text-base">Horários Base da sua Jornada</h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                        Defina seus horários habituais e aplique-os a todos os dias selecionados
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleApplyTemplateToAll}
+                    className="inline-flex items-center justify-center space-x-2 px-4 py-2.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-black uppercase tracking-wider transition-all active:scale-95 shrink-0"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Aplicar a Todos os Dias</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block ml-1">
+                      1. Entrada
+                    </label>
+                    <input
+                      type="time"
+                      value={templateIn}
+                      onChange={e => setTemplateIn(e.target.value)}
+                      className="w-full p-3 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {templateHasLunch ? (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest block ml-1">
+                          2. Saída Almoço
+                        </label>
+                        <input
+                          type="time"
+                          value={templateLunchOut}
+                          onChange={e => setTemplateLunchOut(e.target.value)}
+                          className="w-full p-3 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest block ml-1">
+                          3. Volta Almoço
+                        </label>
+                        <input
+                          type="time"
+                          value={templateLunchIn}
+                          onChange={e => setTemplateLunchIn(e.target.value)}
+                          className="w-full p-3 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </>
+                  ) : null}
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest block ml-1">
+                      {templateHasLunch ? '4. Saída Definitiva' : '2. Saída Definitiva'}
+                    </label>
+                    <input
+                      type="time"
+                      value={templateOut}
+                      onChange={e => setTemplateOut(e.target.value)}
+                      className="w-full p-3 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3 pt-1">
+                  <input
+                    type="checkbox"
+                    id="templateLunchCheck"
+                    checked={templateHasLunch}
+                    onChange={e => setTemplateHasLunch(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <label htmlFor="templateLunchCheck" className="text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                    Incluir intervalo de refeição/almoço (4 batidas por dia)
+                  </label>
+                </div>
+              </div>
+
+              {/* CARD 2: DIAS DO PERÍODO */}
+              <div className="p-6 md:p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-black/5 dark:border-white/5">
+                  <div>
+                    <h4 className="font-black text-slate-900 dark:text-white text-base">Dias para Lançamento</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                      Marque os dias que você trabalhou e ajuste os horários se necessário
+                    </p>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllWorkDays}
+                      className="px-3 py-1.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                    >
+                      Dias Úteis
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSelectAllDays}
+                      className="px-3 py-1.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                    >
+                      Todos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAll}
+                      className="px-3 py-1.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+
+                {isLoadingRetroDays ? (
+                  <div className="py-12 text-center space-y-3">
+                    <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                    <p className="text-xs font-bold text-slate-500">Carregando calendário do período...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {retroDaysList.map(day => (
+                      <div
+                        key={day.dateStr}
+                        className={`p-4 md:p-5 rounded-2xl border transition-all ${
+                          day.selected
+                            ? 'bg-indigo-50/60 dark:bg-indigo-950/20 border-indigo-500/30 shadow-sm'
+                            : 'bg-slate-50/50 dark:bg-black/20 border-black/5 dark:border-white/5 opacity-70'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <label className="flex items-center space-x-3 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={day.selected}
+                              onChange={() => handleToggleDay(day.dateStr)}
+                              className="w-5 h-5 rounded-lg text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-black text-slate-900 dark:text-white text-sm">
+                                  {day.fullDateDisplay}
+                                </span>
+                                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                                  • {day.dayName}
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2 mt-0.5">
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
+                                  day.isWorkDay
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-400'
+                                }`}>
+                                  {day.workDayLabel}
+                                </span>
+                                {day.existingCount > 0 && (
+                                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                    ⚠️ {day.existingCount} ponto(s) existente(s)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </label>
+
+                          {day.selected && (
+                            <div className="flex items-center space-x-2 shrink-0">
+                              <label className="text-[10px] font-bold text-slate-500 flex items-center space-x-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={day.hasLunch}
+                                  onChange={e => handleUpdateDayField(day.dateStr, 'hasLunch', e.target.checked)}
+                                  className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <span>Almoço</span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        {day.selected && (
+                          <div className="mt-4 pt-3 border-t border-indigo-500/15 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                            <div className="space-y-1">
+                              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 block">Entrada</span>
+                              <input
+                                type="time"
+                                value={day.checkIn}
+                                onChange={e => handleUpdateDayField(day.dateStr, 'checkIn', e.target.value)}
+                                className="w-full p-2 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-center text-xs font-black text-slate-900 dark:text-white"
+                              />
+                            </div>
+
+                            {day.hasLunch && (
+                              <>
+                                <div className="space-y-1">
+                                  <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 block">Saída Almoço</span>
+                                  <input
+                                    type="time"
+                                    value={day.lunchOut}
+                                    onChange={e => handleUpdateDayField(day.dateStr, 'lunchOut', e.target.value)}
+                                    className="w-full p-2 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-center text-xs font-black text-slate-900 dark:text-white"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 block">Volta Almoço</span>
+                                  <input
+                                    type="time"
+                                    value={day.lunchIn}
+                                    onChange={e => handleUpdateDayField(day.dateStr, 'lunchIn', e.target.value)}
+                                    className="w-full p-2 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-center text-xs font-black text-slate-900 dark:text-white"
+                                  />
+                                </div>
+                              </>
+                            )}
+
+                            <div className="space-y-1">
+                              <span className="text-[9px] font-black uppercase tracking-wider text-rose-600 block">Saída</span>
+                              <input
+                                type="time"
+                                value={day.checkOut}
+                                onChange={e => handleUpdateDayField(day.dateStr, 'checkOut', e.target.value)}
+                                className="w-full p-2 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl text-center text-xs font-black text-slate-900 dark:text-white"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* CARD 3: JUSTIFICATIVA & ENVIO */}
+              <div className="p-6 md:p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">
+                    Justificativa Geral do Período
+                  </label>
+                  <textarea 
+                    rows="3"
+                    placeholder="Ex: Registro manual em folha física no início das atividades / regularização retroativa autorizada pela gestão..."
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-medium text-sm outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
+                    value={retroBatchReason}
+                    onChange={e => setRetroBatchReason(e.target.value)}
+                  />
+                </div>
+
+                <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <ListChecks className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <strong>{retroDaysList.filter(d => d.selected).length}</strong> dia(s) selecionado(s) • Total de <strong>{retroDaysList.filter(d => d.selected).reduce((acc, d) => acc + (d.hasLunch ? 4 : 2), 0)}</strong> batidas
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                    Aprovação Unificada
+                  </span>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={handleSaveRetroBatch}
+                  disabled={isSubmittingRetroBatch || retroDaysList.filter(d => d.selected).length === 0}
+                  className="w-full py-5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 transition-all active:scale-[0.98] uppercase tracking-widest text-xs flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>
+                    {isSubmittingRetroBatch 
+                      ? 'Enviando Lote para Aprovação...' 
+                      : `Enviar Período Completo (${retroDaysList.filter(d => d.selected).reduce((acc, d) => acc + (d.hasLunch ? 4 : 2), 0)} Batidas)`}
+                  </span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveRetroDay} className="p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl max-w-lg mx-auto">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Data do Ponto</label>
+                <input 
+                  type="date" 
+                  min={employee?.retroactiveStart || undefined}
+                  max={employee?.retroactiveEnd || undefined}
+                  required
+                  className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={retroDayDate}
+                  onChange={e => setRetroDayDate(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Tipo de Marcação</label>
+                <select 
+                  value={retroDayType} 
+                  onChange={e => setRetroDayType(e.target.value)}
+                  className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="check_in">Entrada Principal</option>
+                  <option value="lunch_out">Saída Refeição (Almoço)</option>
+                  <option value="lunch_in">Retorno Refeição (Almoço)</option>
+                  <option value="check_out">Saída Definitiva</option>
+                  <option value="other_in">Retorno Extra</option>
+                  <option value="other_out">Saída Extra</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Horário Real em que Ocorreu</label>
+                <input 
+                  type="time" 
+                  required
+                  className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-xl text-center outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={retroDayTime}
+                  onChange={e => setRetroDayTime(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Justificativa / Motivo</label>
+                <textarea 
+                  rows="3"
+                  placeholder="Ex: Registro manual em folha física no início das atividades na empresa..."
+                  className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-medium text-sm outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
+                  value={retroDayReason}
+                  onChange={e => setRetroDayReason(e.target.value)}
+                />
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={isSubmittingRetro}
+                className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 transition-all active:scale-[0.98] uppercase tracking-widest text-xs flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                <span>{isSubmittingRetro ? 'Enviando...' : 'Enviar para Aprovação do Administrador'}</span>
+              </button>
+            </form>
+          )}
         </div>
       )}
 

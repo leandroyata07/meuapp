@@ -172,8 +172,9 @@ export function AdminDashboard() {
   }
 
   const loadNotifications = async () => {
-    const items = await db.notifications.orderBy('timestamp').reverse().limit(10).toArray()
-    setNotifications(items)
+    const all = await db.notifications.orderBy('timestamp').reverse().toArray()
+    const adminItems = all.filter(n => (!n.target || n.target === 'admin') && !['request_approved', 'request_rejected'].includes(n.type))
+    setNotifications(adminItems.slice(0, 10))
   }
 
   const markNotificationRead = async (id) => {
@@ -185,8 +186,9 @@ export function AdminDashboard() {
 
   const clearAllNotifications = async () => {
     const all = await db.notifications.toArray()
-    await db.notifications.clear()
-    for (const n of all) {
+    const adminNotifs = all.filter(n => (!n.target || n.target === 'admin') && !['request_approved', 'request_rejected'].includes(n.type))
+    for (const n of adminNotifs) {
+      await db.notifications.delete(n.id)
       await deleteDocFromFirestore('notifications', n.id)
     }
     loadNotifications()
@@ -246,7 +248,7 @@ export function AdminDashboard() {
                   className="fixed inset-0 z-[90] bg-black/20 sm:bg-transparent"
                   onClick={() => setShowNotifications(false)} 
                 />
-                <div className="fixed left-3 right-3 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-96 max-w-lg mx-auto glass-panel border border-slate-200/80 dark:border-white/15 rounded-3xl shadow-2xl z-[100] p-5 space-y-4 animate-in slide-in-from-top-3">
+                <div className="fixed left-3 right-3 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-96 max-w-lg mx-auto bg-white dark:bg-[#0c1322] border border-slate-200 dark:border-white/15 rounded-3xl shadow-2xl z-[100] p-5 space-y-4 animate-in slide-in-from-top-3">
                   <div className="flex justify-between items-center pb-3 border-b border-slate-200/60 dark:border-white/10">
                     <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Avisos do Sistema</h3>
                     <button onClick={clearAllNotifications} className="text-[10px] font-bold text-blue-600 hover:text-red-500 uppercase tracking-widest transition-colors">Limpar Tudo</button>
@@ -262,7 +264,7 @@ export function AdminDashboard() {
                         <div 
                           key={n.id} 
                           onClick={() => markNotificationRead(n.id)}
-                          className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-100/60 dark:bg-white/5 border-transparent opacity-60' : 'bg-blue-600/5 dark:bg-blue-600/10 border-blue-500/20 hover:border-blue-500/40 shadow-xs'}`}
+                          className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${n.read ? 'bg-slate-100 dark:bg-white/5 border-slate-200/50 dark:border-transparent opacity-60' : 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-500/30 hover:border-blue-400 dark:hover:border-blue-500/50 shadow-sm'}`}
                         >
                           <div className="flex justify-between items-start mb-1.5 gap-2">
                             <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase tracking-wider shrink-0 ${
@@ -3133,6 +3135,7 @@ function ApprovalsManager({ onAction }) {
       try {
         const notif = {
           employeeId: record.employeeId,
+          target: 'employee',
           recordId: record.id,
           type: 'request_approved',
           title: 'Solicitação Deferida (Aprovada)',
@@ -3158,6 +3161,7 @@ function ApprovalsManager({ onAction }) {
       try {
         const notif = {
           employeeId: record.employeeId,
+          target: 'employee',
           recordId: record.id,
           type: 'request_rejected',
           title: 'Solicitação Indeferida (Recusada)',

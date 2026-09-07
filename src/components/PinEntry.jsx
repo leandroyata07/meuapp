@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar } from 'lucide-react'
+import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar } from 'lucide-react'
 import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
@@ -74,8 +74,9 @@ export function PinEntry() {
         .where('employeeId')
         .equals(Number(empId))
         .toArray()
-      notifs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      setEmployeeNotifications(notifs)
+      const empNotifs = notifs.filter(n => n.target === 'employee' || ['request_approved', 'request_rejected'].includes(n.type))
+      empNotifs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      setEmployeeNotifications(empNotifs)
     } catch (err) {
       console.warn('Erro ao carregar notificações do colaborador:', err)
     }
@@ -415,15 +416,17 @@ export function PinEntry() {
       })
 
       const notifId = await db.notifications.add({
+        target: 'admin',
         type: 'retroactive',
         message: `${employee.name} lançou ponto retroativo para ${format(targetDateTime, 'dd/MM/yyyy')} às ${retroDayTime} (${RECORD_TYPES[retroDayType]?.label || retroDayType}). Aguarda deferimento.`,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
         read: false,
         employeeId: employee.id
       })
 
       await pushDocToFirestore('notifications', notifId, {
         id: notifId,
+        target: 'admin',
         type: 'retroactive',
         message: `${employee.name} lançou ponto retroativo para ${format(targetDateTime, 'dd/MM/yyyy')} às ${retroDayTime} (${RECORD_TYPES[retroDayType]?.label || retroDayType}). Aguarda deferimento.`,
         timestamp: new Date().toISOString(),
@@ -511,14 +514,16 @@ export function PinEntry() {
       // Create Admin Notifications
       if (isForgotten) {
         const notifId = await db.notifications.add({
+          target: 'admin',
           type: 'esquecimento',
           message: `${employee.name} registrou ponto com declaração de esquecimento: informou chegada às ${forgottenTime} (registrado às ${format(now, 'HH:mm')}).`,
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
           read: false,
           employeeId: employee.id
         })
         await pushDocToFirestore('notifications', notifId, {
           id: notifId,
+          target: 'admin',
           type: 'esquecimento',
           message: `${employee.name} registrou ponto com declaração de esquecimento: informou chegada às ${forgottenTime} (registrado às ${format(now, 'HH:mm')}).`,
           timestamp: new Date().toISOString(),
@@ -527,14 +532,16 @@ export function PinEntry() {
         })
       } else if (extraCategory === 'medico') {
         const notifId = await db.notifications.add({
+          target: 'admin',
           type: 'medical',
           message: `${employee.name} registrou uma saída para o médico e anexou um comprovante/foto.`,
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
           read: false,
           employeeId: employee.id
         })
         await pushDocToFirestore('notifications', notifId, {
           id: notifId,
+          target: 'admin',
           type: 'medical',
           message: `${employee.name} registrou uma saída para o médico e anexou um comprovante/foto.`,
           timestamp: new Date().toISOString(),
@@ -554,14 +561,16 @@ export function PinEntry() {
           const tolerance = employee.toleranceMin ?? 10
           if (diffMin > tolerance) { // Tolerância da CLT (Art. 58, § 1º)
             const notifId = await db.notifications.add({
+              target: 'admin',
               type: 'late',
               message: `${employee.name} chegou com ${diffMin} minutos de atraso (Turno: ${employee.shiftStart}, Tolerância CLT: ${tolerance} min).`,
-              timestamp: new Date(),
+              timestamp: new Date().toISOString(),
               read: false,
               employeeId: employee.id
             })
             await pushDocToFirestore('notifications', notifId, {
               id: notifId,
+              target: 'admin',
               type: 'late',
               message: `${employee.name} chegou com ${diffMin} minutos de atraso (Turno: ${employee.shiftStart}, Tolerância CLT: ${tolerance} min).`,
               timestamp: new Date().toISOString(),
@@ -876,8 +885,8 @@ export function PinEntry() {
                   key={notif.id}
                   className={`p-6 rounded-3xl border-2 shadow-xl space-y-4 animate-in slide-in-from-top-3 ${
                     notif.type === 'request_rejected' 
-                      ? 'bg-red-500/10 border-red-500/40 shadow-red-500/10' 
-                      : 'bg-emerald-500/10 border-emerald-500/40 shadow-emerald-500/10'
+                      ? 'bg-red-50 dark:bg-[#1a0b0e] border-red-300 dark:border-red-500/40 shadow-red-500/10' 
+                      : 'bg-emerald-50 dark:bg-[#091a12] border-emerald-300 dark:border-emerald-500/40 shadow-emerald-500/10'
                   }`}
                 >
                   <div className="flex items-start space-x-4">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, Mail, Calendar } from 'lucide-react'
+import { Delete, Check, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar } from 'lucide-react'
 import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
@@ -50,6 +50,10 @@ export function PinEntry() {
   const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const ticketRef = useRef(null)
 
+  // Notificações pessoais do colaborador (deferimentos / indeferimentos)
+  const [employeeNotifications, setEmployeeNotifications] = useState([])
+  const [showEmployeeNotifsModal, setShowEmployeeNotifsModal] = useState(false)
+
   // Ajuste de Ponto Esquecido no mesmo dia
   const [isForgottenOpen, setIsForgottenOpen] = useState(false)
   const [forgottenType, setForgottenType] = useState('check_in')
@@ -62,6 +66,20 @@ export function PinEntry() {
   const [retroDayTime, setRetroDayTime] = useState('08:00')
   const [retroDayReason, setRetroDayReason] = useState('')
   const [isSubmittingRetro, setIsSubmittingRetro] = useState(false)
+
+  const loadEmployeeNotifications = async (empId = employeeId) => {
+    if (!empId) return
+    try {
+      const notifs = await db.notifications
+        .where('employeeId')
+        .equals(Number(empId))
+        .toArray()
+      notifs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      setEmployeeNotifications(notifs)
+    } catch (err) {
+      console.warn('Erro ao carregar notificações do colaborador:', err)
+    }
+  }
 
   useEffect(() => {
     db.settings.get('config').then(setSettings)
@@ -77,6 +95,16 @@ export function PinEntry() {
       }
     })
     loadTodayRecords()
+    loadEmployeeNotifications()
+
+    const handleSync = () => {
+      loadTodayRecords()
+      loadEmployeeNotifications()
+    }
+    window.addEventListener('pontoaqui:sync', handleSync)
+    return () => {
+      window.removeEventListener('pontoaqui:sync', handleSync)
+    }
   }, [employeeId])
 
   useEffect(() => {
@@ -272,12 +300,15 @@ export function PinEntry() {
     let body = ''
     if (isSingle) {
       const t = selectedTickets[0]
-      body = `COMPROVANTE DE PONTO\n\n` +
+      const isRejected = t.status === 'rejected'
+      body = (isRejected ? `[SOLICITAÇÃO INDEFERIDA - NÃO VÁLIDA COMO PONTO OFICIAL]\nMotivo: ${t.rejectionReason || 'Recusado pela gestão'}\nFavor procurar o setor de Recursos Humanos (RH).\n\n` : '') +
+             `COMPROVANTE DE PONTO\n\n` +
              `Empresa: ${settings?.companyName || 'Empresa'}\n` +
              `Funcionário: ${employee.name}\n` +
              `Data: ${format(new Date(t.timestamp), 'dd/MM/yyyy')}\n` +
              `Hora: ${format(new Date(t.timestamp), 'HH:mm')}\n` +
              `Registro: ${RECORD_TYPES[t.type]?.label}\n` +
+             (isRejected ? `Status: INDEFERIDO (RECUSADO)\n` : '') +
              `Chave: ${new Date(t.timestamp).getTime().toString(16).toUpperCase()}`
     } else {
       body = `EXTRATO DE PONTO\n\n` +
@@ -794,29 +825,185 @@ export function PinEntry() {
 
       {step === 'select' && (
         <div className="w-full max-w-2xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-400 relative z-10">
-          <div className="glass-panel p-6 rounded-3xl shadow-xl flex items-center space-x-5 border border-slate-200/80 dark:border-white/10">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 flex items-center justify-center border border-blue-500/30 overflow-hidden flex-shrink-0 shadow-sm p-0.5">
-              {employee.photo ? (
-                <img src={employee.photo} alt={employee.name} className="w-full h-full object-cover rounded-xl" />
-              ) : (
-                <User className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-              )}
-            </div>
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Olá, {employee.name.split(' ')[0]}!
-              </h2>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                  {todayRecords.length === 0 ? 'Aguardando Entrada' : 'Jornada em andamento'}
-                </span>
-                <span className="text-xs text-slate-400 font-medium">
-                  • {todayRecords.length} registro(s) hoje
-                </span>
+          <div className="glass-panel p-6 rounded-3xl shadow-xl flex items-center justify-between border border-slate-200/80 dark:border-white/10">
+            <div className="flex items-center space-x-5 min-w-0">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 flex items-center justify-center border border-blue-500/30 overflow-hidden flex-shrink-0 shadow-sm p-0.5">
+                {employee.photo ? (
+                  <img src={employee.photo} alt={employee.name} className="w-full h-full object-cover rounded-xl" />
+                ) : (
+                  <User className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                )}
+              </div>
+              <div className="truncate">
+                <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight truncate">
+                  Olá, {employee.name.split(' ')[0]}!
+                </h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    {todayRecords.length === 0 ? 'Aguardando Entrada' : 'Jornada em andamento'}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium truncate">
+                    • {todayRecords.length} registro(s) hoje
+                  </span>
+                </div>
               </div>
             </div>
+
+            {/* Botão de Histórico de Notificações */}
+            {employeeNotifications.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowEmployeeNotifsModal(true)}
+                className="relative p-3 rounded-2xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 transition-all border border-slate-200 dark:border-white/10 shrink-0"
+                title="Minhas Notificações"
+              >
+                <Bell className="w-5 h-5" />
+                {employeeNotifications.filter(n => !n.read).length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm">
+                    {employeeNotifications.filter(n => !n.read).length}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
+
+          {/* Cards de Notificações Não Lidas (Especialmente Indeferimentos) */}
+          {employeeNotifications.filter(n => !n.read).length > 0 && (
+            <div className="space-y-3">
+              {employeeNotifications.filter(n => !n.read).map(notif => (
+                <div 
+                  key={notif.id}
+                  className={`p-6 rounded-3xl border-2 shadow-xl space-y-4 animate-in slide-in-from-top-3 ${
+                    notif.type === 'request_rejected' 
+                      ? 'bg-red-500/10 border-red-500/40 shadow-red-500/10' 
+                      : 'bg-emerald-500/10 border-emerald-500/40 shadow-emerald-500/10'
+                  }`}
+                >
+                  <div className="flex items-start space-x-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-white shadow-lg mt-0.5 ${
+                      notif.type === 'request_rejected' ? 'bg-red-600 shadow-red-600/30' : 'bg-emerald-600 shadow-emerald-600/30'
+                    }`}>
+                      {notif.type === 'request_rejected' ? <ShieldAlert className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className={`font-black text-sm uppercase tracking-wide ${
+                          notif.type === 'request_rejected' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                        }`}>
+                          {notif.title || (notif.type === 'request_rejected' ? 'Solicitação Indeferida' : 'Solicitação Deferida')}
+                        </h4>
+                        {notif.type === 'request_rejected' && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-red-600 text-white uppercase animate-pulse">
+                            Procure o RH
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs font-bold mt-1 leading-relaxed text-slate-800 dark:text-slate-200">
+                        {notif.message}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono mt-1.5">
+                        {notif.timestamp && format(new Date(notif.timestamp), "dd/MM/yyyy 'às' HH:mm")}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-black/5 dark:border-white/10">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await db.notifications.update(notif.id, { read: true })
+                        const updated = await db.notifications.get(notif.id)
+                        if (updated) await pushDocToFirestore('notifications', notif.id, updated)
+                        loadEmployeeNotifications()
+                      }}
+                      className="px-5 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border border-slate-200 dark:border-white/10 active:scale-95 shadow-sm"
+                    >
+                      Marcar como Ciente
+                    </button>
+                    
+                    {notif.recordId && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const rec = await db.records.get(notif.recordId)
+                          if (rec) {
+                            setSelectedTickets([rec])
+                            setStep('ticket')
+                          }
+                        }}
+                        className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-md shadow-red-600/30 active:scale-95 flex items-center space-x-1.5"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Ver Recibo com Marca d'Água</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Modal com Histórico Completo de Notificações */}
+          {showEmployeeNotifsModal && (
+            <div 
+              className="fixed inset-0 z-[150] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+              onClick={() => setShowEmployeeNotifsModal(false)}
+            >
+              <div 
+                className="relative max-w-lg w-full bg-white dark:bg-slate-900 rounded-[2.5rem] p-7 border border-slate-200 dark:border-white/10 shadow-2xl space-y-5 animate-in zoom-in duration-200 max-h-[85vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-white/10">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+                      <Bell className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900 dark:text-white">Minhas Notificações</h3>
+                      <p className="text-[10px] text-slate-400 font-bold">Histórico de comunicados da gestão</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowEmployeeNotifsModal(false)} className="p-2 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-xl">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                  {employeeNotifications.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-slate-400 font-medium">Nenhuma notificação registrada.</p>
+                  ) : (
+                    employeeNotifications.map(n => (
+                      <div 
+                        key={n.id} 
+                        className={`p-4 rounded-2xl border text-xs space-y-2 ${
+                          n.type === 'request_rejected' ? 'bg-red-500/5 border-red-500/20 text-red-900 dark:text-red-200' : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-900 dark:text-emerald-200'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <span className={`font-black uppercase text-[10px] ${n.type === 'request_rejected' ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {n.title}
+                          </span>
+                          <span className="text-[9px] text-slate-400 font-mono">
+                            {format(new Date(n.timestamp), 'dd/MM/yyyy HH:mm')}
+                          </span>
+                        </div>
+                        <p className="font-medium leading-relaxed">{n.message}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowEmployeeNotifsModal(false)}
+                  className="w-full py-3.5 bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 font-black rounded-2xl text-xs uppercase tracking-wider hover:bg-slate-200 transition-all"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          )}
 
           {isDemo && (
             <div className="p-6 bg-orange-500/10 border border-orange-500/20 rounded-[2.5rem] space-y-4 animate-in slide-in-from-top-4 duration-500">
@@ -1351,7 +1538,7 @@ export function PinEntry() {
                                 r.status === 'approved' ? 'bg-emerald-500/20 text-emerald-500' :
                                 'bg-red-500/20 text-red-500'
                               }`}>
-                                {r.status === 'pending' ? 'Pendente' : r.status === 'approved' ? 'Aprovado' : 'Recusado'}
+                                {r.status === 'pending' ? 'Pendente' : r.status === 'approved' ? 'Deferido' : 'Indeferido'}
                               </span>
                             )}
                           </div>
@@ -1383,6 +1570,18 @@ export function PinEntry() {
             className="w-72 bg-[#fef3c7] text-[#1e293b] p-6 shadow-2xl relative overflow-hidden"
             style={{ fontFamily: '"Courier New", Courier, monospace', borderTop: '4px dashed #cbd5e1', borderBottom: '4px dashed #cbd5e1' }}
           >
+            {/* Marca d'água cruzada oficial de INDEFERIDO quando o registro for recusado */}
+            {selectedTickets.length === 1 && selectedTickets[0].status === 'rejected' && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-20 overflow-hidden">
+                <div className="transform -rotate-45 border-4 border-dashed border-red-600/80 text-red-600/90 font-black text-2xl uppercase tracking-widest px-4 py-2 text-center select-none bg-red-100/60 backdrop-blur-[0.5px] shadow-sm">
+                  INDEFERIDO
+                  <span className="text-[8px] font-bold tracking-normal block mt-0.5 text-red-700 uppercase">
+                    INVÁLIDO • PROCURE O RH
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="text-center space-y-2 border-b border-dashed border-[#94a3b8] pb-4 mb-4">
               <h2 className="font-black text-lg tracking-tight uppercase leading-tight">{settings?.companyName || 'Empresa'}</h2>
               <p className="text-[10px] font-bold">{selectedTickets.length > 1 ? 'EXTRATO DE PONTO' : 'COMPROVANTE DE PONTO'}</p>
@@ -1411,9 +1610,24 @@ export function PinEntry() {
                     <p className="text-[#64748b] text-[10px] uppercase">Registro</p>
                     <p>{RECORD_TYPES[selectedTickets[0].type]?.label}</p>
                     {selectedTickets[0].comment && (
-                      <p className="text-[9px] text-[#64748b] italic mt-1 font-medium">Motivo: {selectedTickets[0].comment}</p>
+                      <p className="text-[9px] text-[#64748b] italic mt-1 font-medium">Motivo declarado: {selectedTickets[0].comment}</p>
                     )}
                   </div>
+
+                  {/* Informação destacada de Indeferimento dentro do comprovante */}
+                  {selectedTickets[0].status === 'rejected' && (
+                    <div className="p-3 bg-red-100/95 border-2 border-dashed border-red-500 rounded-lg text-red-900 text-[10px] space-y-1.5 my-2">
+                      <p className="font-black text-xs flex items-center gap-1 text-red-700">
+                        <span>⚠️ SOLICITAÇÃO INDEFERIDA (RECUSADA)</span>
+                      </p>
+                      {selectedTickets[0].rejectionReason && (
+                        <p className="font-bold">Motivo: "{selectedTickets[0].rejectionReason}"</p>
+                      )}
+                      <p className="font-semibold leading-tight text-[9px] text-red-800">
+                        Este lançamento não foi aceito como ponto oficial pela administração. Favor procurar o setor de Recursos Humanos (RH) para esclarecimentos e regularização.
+                      </p>
+                    </div>
+                  )}
 
                   <div>
                     <p className="text-[#64748b] text-[10px] uppercase">Chave de Autenticação (Hash)</p>
@@ -1439,7 +1653,7 @@ export function PinEntry() {
                                 <span className="text-[8px] text-[#64748b] leading-tight italic max-w-[150px]">Motivo: {t.comment}</span>
                                 {t.category === 'medico' && (
                                   <span className="text-[7px] font-black uppercase opacity-70">
-                                    [{t.status === 'pending' ? 'Pendente' : t.status === 'approved' ? 'Aprovado' : 'Recusado'}]
+                                    [{t.status === 'pending' ? 'Pendente' : t.status === 'approved' ? 'Deferido' : 'Indeferido'}]
                                   </span>
                                 )}
                               </div>
@@ -1469,8 +1683,8 @@ export function PinEntry() {
                 <QRCodeSVG 
                   value={
                     selectedTickets.length === 1 
-                      ? `whatsapp://send?text=${encodeURIComponent('*COMPROVANTE DE PONTO*\n\n🏢 *Empresa:* ' + (settings?.companyName || 'Empresa') + '\n👤 *Funcionário:* ' + employee.name + '\n📅 *Data:* ' + format(new Date(selectedTickets[0].timestamp), 'dd/MM/yyyy') + '\n⏰ *Hora:* ' + format(new Date(selectedTickets[0].timestamp), 'HH:mm') + '\n📝 *Registro:* ' + RECORD_TYPES[selectedTickets[0].type]?.label + '\n🔑 *Hash:* ' + new Date(selectedTickets[0].timestamp).getTime().toString(16).toUpperCase())}`
-                      : `whatsapp://send?text=${encodeURIComponent('*EXTRATO DE PONTO*\n\n🏢 *Empresa:* ' + (settings?.companyName || 'Empresa') + '\n👤 *Funcionário:* ' + employee.name + '\n📅 *Período:* ' + format(new Date(startDate), 'dd/MM') + ' a ' + format(new Date(endDate), 'dd/MM') + '\n⏱️ *Total:* ' + calculateTotalHours(selectedTickets) + '\n\n' + selectedTickets.map(t => '• ' + format(new Date(t.timestamp), 'dd/MM HH:mm') + ' - ' + RECORD_TYPES[t.type]?.label.split(' ')[0]).join('\n'))}`
+                      ? `whatsapp://send?text=${encodeURIComponent((selectedTickets[0].status === 'rejected' ? '❌ *[SOLICITAÇÃO INDEFERIDA - INVÁLIDO COMO PONTO OFICIAL]*\n⚠️ *Favor procurar o setor de RH.*\n\n' : '') + '*COMPROVANTE DE PONTO*\n\n🏢 *Empresa:* ' + (settings?.companyName || 'Empresa') + '\n👤 *Funcionário:* ' + employee.name + '\n📅 *Data:* ' + format(new Date(selectedTickets[0].timestamp), 'dd/MM/yyyy') + '\n⏰ *Hora:* ' + format(new Date(selectedTickets[0].timestamp), 'HH:mm') + '\n📝 *Registro:* ' + RECORD_TYPES[selectedTickets[0].type]?.label + (selectedTickets[0].status === 'rejected' ? '\n❌ *Status:* INDEFERIDO' : '') + '\n🔑 *Hash:* ' + new Date(selectedTickets[0].timestamp).getTime().toString(16).toUpperCase())}`
+                      : `whatsapp://send?text=${encodeURIComponent('*EXTRATO DE PONTO*\n\n🏢 *Empresa:* ' + (settings?.companyName || 'Empresa') + '\n👤 *Funcionário:* ' + employee.name + '\n📅 *Período:* ' + format(new Date(startDate), 'dd/MM') + ' a ' + format(new Date(endDate), 'dd/MM') + '\n⏱️ *Total:* ' + calculateTotalHours(selectedTickets) + '\n\n' + selectedTickets.map(t => '• ' + format(new Date(t.timestamp), 'dd/MM HH:mm') + ' - ' + RECORD_TYPES[t.type]?.label.split(' ')[0] + (t.status === 'rejected' ? ' [INDEFERIDO]' : '')).join('\n'))}`
                   } 
                   size={200} 
                 />

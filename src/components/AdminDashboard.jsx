@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { db } from '../db'
+import { db, factoryResetLocalDatabase } from '../db'
 import { useNavigate } from '@tanstack/react-router'
 import { 
   Users, 
@@ -88,7 +88,8 @@ import {
   pushDocToFirestore,
   deleteDocFromFirestore,
   syncAllLocalToFirestore,
-  compressImage
+  compressImage,
+  factoryResetFirestore
 } from '../firebase'
 import { 
   BarChart, 
@@ -3114,6 +3115,48 @@ function SettingsManager() {
     endDate: format(new Date(), 'yyyy-MM-dd'),
   })
 
+  // Estado para Reset de Fábrica (Zerar Todo o Sistema)
+  const [showResetModal, setShowResetModal] = useState(false)
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetConfirmText, setResetConfirmText] = useState('')
+  const [isResetting, setIsResetting] = useState(false)
+  const [resetStatusText, setResetStatusText] = useState('')
+  const [resetError, setResetError] = useState('')
+
+  const handleFactoryReset = async () => {
+    setResetError('')
+    const adminPass = settings.adminPassword || 'killer'
+    if (resetPassword !== adminPass) {
+      setResetError('Senha Mestra incorreta!')
+      return
+    }
+    if (resetConfirmText.trim().toUpperCase() !== 'ZERAR') {
+      setResetError('Por favor, digite a palavra ZERAR para confirmar.')
+      return
+    }
+
+    setIsResetting(true)
+    setResetStatusText('Interrompendo sincronizações ativas...')
+    try {
+      stopRealtimeSync()
+
+      setResetStatusText('Limpando documentos e registros no Firebase Firestore...')
+      await factoryResetFirestore()
+
+      setResetStatusText('Reiniciando banco de dados local (IDs reiniciam no 1)...')
+      await factoryResetLocalDatabase()
+
+      setResetStatusText('Reset de Fábrica concluído com sucesso! Recarregando sistema...')
+      setTimeout(() => {
+        window.location.reload()
+      }, 1400)
+    } catch (err) {
+      console.error('Falha no Reset de Fábrica:', err)
+      setResetError(`Erro ao executar o reset: ${err.message || 'Falha desconhecida.'}`)
+      setIsResetting(false)
+    }
+  }
+
   useEffect(() => {
     db.settings.get('config').then(val => { if (val) setSettings(val) })
     db.employees.toArray().then(setEmployees)
@@ -3546,6 +3589,40 @@ function SettingsManager() {
             </div>
           </div>
 
+          {/* Card de Reset de Fábrica / Zerar Todo o Sistema */}
+          <div className="bg-gradient-to-br from-rose-500/10 via-red-500/5 to-amber-500/5 dark:from-rose-950/30 dark:via-red-950/20 dark:to-transparent p-8 lg:p-12 rounded-[3rem] border-2 border-red-500/30 dark:border-red-500/20 shadow-xl space-y-6 relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="space-y-3">
+                <div className="inline-flex items-center space-x-2 px-3.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-[10px] font-black uppercase tracking-widest">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>Ambiente de Produção • Início Limpo</span>
+                </div>
+                <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+                  <RefreshCw className="w-6 h-6 mr-3 text-red-600" />
+                  Reset de Fábrica (Zerar Todo o Sistema)
+                </h3>
+                <p className="text-xs md:text-sm text-slate-600 dark:text-slate-300 font-medium leading-relaxed max-w-2xl">
+                  Apaga todos os registros de ponto, notificações, setores, feriados e colaboradores criados durante os testes.
+                  <strong className="text-red-600 dark:text-red-400"> Reinicia os códigos iniciais (IDs a partir do 1)</strong> no banco de dados local e no Firebase Firestore. O perfil de Administrador (senha e preferências) e o Perfil de Teste são preservados.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setResetPassword('')
+                  setResetConfirmText('')
+                  setResetError('')
+                  setShowResetModal(true)
+                }}
+                className="px-8 py-5 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-red-600/30 active:scale-95 transition-all flex items-center justify-center space-x-3 shrink-0"
+              >
+                <Trash2 className="w-5 h-5" />
+                <span>Zerar Sistema Agora</span>
+              </button>
+            </div>
+          </div>
+
           <div className="bg-red-50 dark:bg-red-900/10 p-8 lg:p-12 rounded-[3rem] border border-red-200 dark:border-red-900/20 shadow-sm space-y-10">
             <h3 className="text-xl font-black text-red-600 tracking-tight flex items-center">
               <div className="w-2 h-6 bg-red-600 rounded-full mr-3" />
@@ -3903,6 +3980,105 @@ function SettingsManager() {
               <button onClick={runDeletion} className="w-full py-6 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl shadow-xl shadow-red-900/30 transition-all active:scale-[0.98] uppercase tracking-[0.2em]">Executar Limpeza</button>
               <button onClick={() => setConfirmModal({ show: false, password: '' })} className="w-full py-4 text-[10px] font-black text-slate-500 uppercase hover:text-slate-900 dark:hover:text-white tracking-[0.3em] transition-colors">Abortar Missão</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DO RESET DE FÁBRICA */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-2xl animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-[3rem] p-8 md:p-10 space-y-6 shadow-2xl relative border border-black/10 dark:border-white/10 overflow-hidden max-h-[90vh] overflow-y-auto">
+            
+            <div className="flex items-center space-x-4">
+              <div className="w-14 h-14 rounded-2xl bg-red-600/10 text-red-600 border border-red-600/20 flex items-center justify-center shrink-0 shadow-inner">
+                <ShieldAlert className="w-8 h-8 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Reset de Fábrica do Sistema
+                </h3>
+                <p className="text-[10px] text-red-600 dark:text-red-400 font-black uppercase tracking-widest mt-0.5">
+                  Ação Irreversível • Preparação de Uso
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 bg-slate-50 dark:bg-black/40 p-5 rounded-2xl border border-black/5 dark:border-white/5 text-xs text-slate-600 dark:text-slate-300">
+              <p className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[10px]">
+                O que esta ação fará:
+              </p>
+              <ul className="space-y-1.5 list-disc list-inside leading-relaxed">
+                <li><strong className="text-red-600 dark:text-red-400">Apaga:</strong> Todos os registros de ponto e comprovantes</li>
+                <li><strong className="text-red-600 dark:text-red-400">Apaga:</strong> Todas as notificações de admin e de colaboradores</li>
+                <li><strong className="text-red-600 dark:text-red-400">Apaga:</strong> Setores, feriados e colaboradores cadastrados nos testes</li>
+                <li><strong className="text-blue-600 dark:text-blue-400">Reinicia IDs:</strong> Os códigos recomeçam a partir do <strong>1</strong> tanto no banco local quanto no Firebase</li>
+                <li><strong className="text-emerald-600 dark:text-emerald-400">Preserva:</strong> Acesso Admin (senha mestra, logo, credenciais) e Perfil de Teste fixado com ID 1</li>
+              </ul>
+            </div>
+
+            {resetError && (
+              <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-600 text-xs font-bold flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{resetError}</span>
+              </div>
+            )}
+
+            {isResetting ? (
+              <div className="py-8 text-center space-y-4">
+                <RefreshCw className="w-12 h-12 text-red-600 animate-spin mx-auto" />
+                <p className="text-sm font-black text-slate-800 dark:text-slate-100">
+                  {resetStatusText || 'Executando Reset de Fábrica...'}
+                </p>
+                <p className="text-[11px] text-slate-400 font-medium">Por favor, aguarde e não feche a página.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    1. Senha Mestra do Administrador *
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Digite a senha mestra do admin"
+                    value={resetPassword}
+                    onChange={e => setResetPassword(e.target.value)}
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    2. Digite a palavra <strong className="text-red-600">ZERAR</strong> para confirmar *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ZERAR"
+                    value={resetConfirmText}
+                    onChange={e => setResetConfirmText(e.target.value)}
+                    className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-xs font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500 tracking-widest uppercase"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowResetModal(false)}
+                    className="flex-1 py-4 text-xs font-black text-slate-500 hover:text-slate-800 dark:hover:text-white uppercase tracking-wider rounded-2xl hover:bg-slate-100 dark:hover:bg-white/5 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFactoryReset}
+                    disabled={!resetPassword || resetConfirmText.trim().toUpperCase() !== 'ZERAR'}
+                    className="flex-1 py-4 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-red-600/30 active:scale-95 transition-all flex items-center justify-center space-x-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirmar Reset</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

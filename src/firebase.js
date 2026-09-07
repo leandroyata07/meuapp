@@ -354,3 +354,72 @@ export async function syncAllLocalToFirestore() {
 
   return { success: true, count: totalUploaded }
 }
+
+/**
+ * Zera todo o Firestore (Reset de Fábrica na nuvem),
+ * limpando records, notifications, departments, holidays e employees (preservando apenas o perfil de teste como ID 1)
+ */
+export async function factoryResetFirestore() {
+  const instance = initFirebase()
+  if (!instance) {
+    return { success: false, message: 'Firebase não está configurado ou offline.' }
+  }
+
+  const firestore = instance.firestore
+
+  // 1. Limpa coleções de dados transacionais e cadastrais completos
+  const wipeCollections = ['records', 'notifications', 'departments', 'holidays']
+  for (const colName of wipeCollections) {
+    try {
+      const snap = await getDocs(collection(firestore, colName))
+      const docs = snap.docs
+      for (let i = 0; i < docs.length; i += 400) {
+        const batch = writeBatch(firestore)
+        const chunk = docs.slice(i, i + 400)
+        chunk.forEach(d => batch.delete(d.ref))
+        await batch.commit()
+      }
+    } catch (e) {
+      console.warn(`[Firebase Reset] Erro ao limpar coleção ${colName}:`, e)
+    }
+  }
+
+  // 2. Limpa colaboradores, exceto o perfil de teste padronizado como ID 1
+  try {
+    const empSnap = await getDocs(collection(firestore, 'employees'))
+    const empDocs = empSnap.docs
+    for (let i = 0; i < empDocs.length; i += 400) {
+      const batch = writeBatch(firestore)
+      const chunk = empDocs.slice(i, i + 400)
+      chunk.forEach(d => {
+        const data = d.data()
+        // Se for o perfil de teste existente com id diferente de 1, removemos para recriar estritamente com ID 1
+        if (d.id === '1' && (data.cpf === '000.000.000-00' || data.isDemo)) {
+          // mantém
+        } else {
+          batch.delete(d.ref)
+        }
+      })
+      await batch.commit()
+    }
+
+    // Garante que o perfil de teste exista com docId '1'
+    const demoRef = doc(firestore, 'employees', '1')
+    await setDoc(demoRef, {
+      id: 1,
+      name: 'TESTE (DEMO) - FUNCIONÁRIO',
+      pin: '0000',
+      cpf: '000.000.000-00',
+      email: 'teste@exemplo.com',
+      shiftStart: '08:00',
+      shiftEnd: '17:00',
+      isDemo: true,
+      photo: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+      updatedAt: new Date().toISOString()
+    })
+  } catch (e) {
+    console.warn('[Firebase Reset] Erro ao processar colaboradores:', e)
+  }
+
+  return { success: true }
+}

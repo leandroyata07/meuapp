@@ -78,3 +78,33 @@ export async function runAutoCheckout() {
     }
   }
 }
+
+export async function factoryResetLocalDatabase() {
+  // Salva configurações atuais para preservar senha mestra, preferências e credenciais
+  const currentSettings = await db.settings.get('config');
+  
+  db.close();
+  await db.delete();
+  await db.open();
+
+  if (currentSettings) {
+    await db.settings.put(currentSettings);
+  } else {
+    await initSettings();
+  }
+
+  // Cria perfil de teste padronizado como ID 1
+  await db.employees.add({
+    id: 1,
+    name: 'TESTE (DEMO) - FUNCIONÁRIO',
+    pin: '0000',
+    cpf: '000.000.000-00',
+    email: 'teste@exemplo.com',
+    shiftStart: '08:00',
+    shiftEnd: '17:00',
+    isDemo: true,
+    photo: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'
+  });
+
+  return { success: true };
+}

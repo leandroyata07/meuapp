@@ -633,7 +633,15 @@ function EmployeeManager({ employees, departments, onDataChange }) {
     departmentId: '',
     allowRetroactive: false,
     retroactiveStart: '',
-    retroactiveEnd: ''
+    retroactiveEnd: '',
+    autoPunchEnabled: false,
+    autoPunchLat: '',
+    autoPunchLng: '',
+    autoPunchRadius: 25,
+    autoPunchWifi: '',
+    autoPunchLunchThreshold: '11:50',
+    autoPunchMinInterval: 10,
+    autoPunchSound: true
   }
 
   const [newEmp, setNewEmp] = useState(defaultEmpState)
@@ -713,7 +721,15 @@ function EmployeeManager({ employees, departments, onDataChange }) {
       shiftEnd: emp.shiftEnd || '17:48',
       breakMinutes: emp.breakMinutes ?? 60,
       scaleStartDate: emp.scaleStartDate || emp.startDate || format(new Date(), 'yyyy-MM-dd'),
-      toleranceMin: emp.toleranceMin ?? 10
+      toleranceMin: emp.toleranceMin ?? 10,
+      autoPunchEnabled: emp.autoPunchEnabled || false,
+      autoPunchLat: emp.autoPunchLat != null ? emp.autoPunchLat : '',
+      autoPunchLng: emp.autoPunchLng != null ? emp.autoPunchLng : '',
+      autoPunchRadius: emp.autoPunchRadius ?? 25,
+      autoPunchWifi: emp.autoPunchWifi || '',
+      autoPunchLunchThreshold: emp.autoPunchLunchThreshold || '11:50',
+      autoPunchMinInterval: emp.autoPunchMinInterval ?? 10,
+      autoPunchSound: emp.autoPunchSound !== false
     })
     setEditingId(emp.id)
     setShowAdd(true)
@@ -1220,6 +1236,175 @@ function EmployeeManager({ employees, departments, onDataChange }) {
             )}
           </div>
 
+          {/* SEÇÃO AUTO-PONTO POR GEOLOCALIZAÇÃO / PRESENÇA INTELIGENTE (EXCLUSIVO / PLUS) */}
+          <div className="p-6 sm:p-8 bg-gradient-to-br from-blue-500/5 via-indigo-500/5 to-purple-500/5 dark:from-blue-500/10 dark:via-indigo-500/10 dark:to-purple-500/10 rounded-[2.5rem] border border-blue-500/20 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-600/25 shrink-0">
+                  <MapPin className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-base font-black text-slate-900 dark:text-white tracking-tight">Auto-Ponto por Presença (Geofencing)</h4>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-blue-600 text-white tracking-widest">Plus</span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Batimento 100% automático ao entrar ou sair do raio delimitado (GPS/Wi-Fi da sua sala).
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setNewEmp({ ...newEmp, autoPunchEnabled: !newEmp.autoPunchEnabled })}
+                className={`w-14 h-7 rounded-full transition-all relative shrink-0 ${newEmp.autoPunchEnabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-800'}`}
+              >
+                <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all shadow-md ${newEmp.autoPunchEnabled ? 'left-8' : 'left-1'}`} />
+              </button>
+            </div>
+
+            {newEmp.autoPunchEnabled && (
+              <div className="space-y-6 pt-4 border-t border-blue-500/20 animate-in fade-in zoom-in duration-300">
+                <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-start space-x-3 text-xs text-blue-900 dark:text-blue-200">
+                  <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold">Como funciona a automação:</p>
+                    <p className="text-[11px] leading-relaxed opacity-90">
+                      • <strong>Ao chegar na sala (dentro do raio):</strong> Se for o início do dia, registra <em>Entrada</em>. Se estiver retornando do almoço, registra <em>Retorno Refeição</em>.<br />
+                      • <strong>Ao sair do raio antes de {newEmp.autoPunchLunchThreshold || '11:50'}:</strong> Registra <em>Saída Extra / Pausa</em>.<br />
+                      • <strong>Ao sair a partir de {newEmp.autoPunchLunchThreshold || '11:50'}:</strong> Registra <em>Saída Refeição (Almoço)</em>.<br />
+                      • <strong>Ao sair após o almoço / no fim da jornada:</strong> Registra <em>Saída Definitiva</em>.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Coordenadas e Botão de Captura */}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Latitude da Sala / Local</label>
+                      <input 
+                        type="number" 
+                        step="any" 
+                        className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-mono font-black text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                        value={newEmp.autoPunchLat || ''} 
+                        onChange={e => setNewEmp({ ...newEmp, autoPunchLat: e.target.value })} 
+                        placeholder="-23.550520" 
+                        required={newEmp.autoPunchEnabled}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Longitude da Sala / Local</label>
+                      <input 
+                        type="number" 
+                        step="any" 
+                        className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-mono font-black text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                        value={newEmp.autoPunchLng || ''} 
+                        onChange={e => setNewEmp({ ...newEmp, autoPunchLng: e.target.value })} 
+                        placeholder="-46.633308" 
+                        required={newEmp.autoPunchEnabled}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!('geolocation' in navigator)) {
+                        alert('Geolocalização não disponível no seu navegador.')
+                        return
+                      }
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                          setNewEmp(prev => ({
+                            ...prev,
+                            autoPunchLat: Number(pos.coords.latitude.toFixed(6)),
+                            autoPunchLng: Number(pos.coords.longitude.toFixed(6))
+                          }))
+                          alert(`Coordenadas capturadas com sucesso!\nLat: ${pos.coords.latitude.toFixed(6)}\nLng: ${pos.coords.longitude.toFixed(6)}\nPrecisão estimada: ±${Math.round(pos.coords.accuracy)}m`)
+                        },
+                        (err) => {
+                          alert(`Erro ao obter GPS: ${err.message}. Verifique a permissão de localização do navegador.`)
+                        },
+                        { enableHighAccuracy: true, timeout: 10000 }
+                      )
+                    }}
+                    className="w-full py-3.5 bg-blue-600/10 hover:bg-blue-600 text-blue-600 hover:text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all border border-blue-600/20 flex items-center justify-center space-x-2 active:scale-98 cursor-pointer"
+                  >
+                    <MapPin className="w-4 h-4" />
+                    <span>Capturar GPS da Minha Sala Agora</span>
+                  </button>
+                </div>
+
+                {/* Parâmetros de Raio, Almoço e Anti-Rebote */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Raio de Detecção (Metros)</label>
+                    <input 
+                      type="number" 
+                      min="10" 
+                      max="200" 
+                      className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                      value={newEmp.autoPunchRadius ?? 25} 
+                      onChange={e => setNewEmp({ ...newEmp, autoPunchRadius: Number(e.target.value) })} 
+                    />
+                    <p className="text-[9px] text-slate-400 px-1">Recomendado: 20m a 35m para salas em prédios.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Divisor Saída/Almoço</label>
+                    <input 
+                      type="time" 
+                      className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer" 
+                      value={newEmp.autoPunchLunchThreshold || '11:50'} 
+                      onChange={e => setNewEmp({ ...newEmp, autoPunchLunchThreshold: e.target.value })} 
+                    />
+                    <p className="text-[9px] text-slate-400 px-1">Saídas a partir deste horário contam como Almoço.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Intervalo Anti-Rebote</label>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="60" 
+                      className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                      value={newEmp.autoPunchMinInterval ?? 10} 
+                      onChange={e => setNewEmp({ ...newEmp, autoPunchMinInterval: Number(e.target.value) })} 
+                    />
+                    <p className="text-[9px] text-slate-400 px-1">Minutos mínimos entre batidas automáticas consecutivas.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center pt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Wi-Fi Autorizado (Opcional)</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ex: MinhaSala_5G" 
+                      className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500" 
+                      value={newEmp.autoPunchWifi || ''} 
+                      onChange={e => setNewEmp({ ...newEmp, autoPunchWifi: e.target.value })} 
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-white dark:bg-black/40 rounded-2xl border border-black/5 dark:border-white/10">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Notificação Sonora</span>
+                      <span className="text-[10px] text-slate-400">Tocar sinal sonoro ao bater ponto automático</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setNewEmp({ ...newEmp, autoPunchSound: newEmp.autoPunchSound === false })}
+                      className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${newEmp.autoPunchSound !== false ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-800'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all shadow-md ${newEmp.autoPunchSound !== false ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <button type="submit" className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">{editingId ? 'Salvar Alterações' : 'Finalizar Cadastro'}</button>
         </form>
       )}
@@ -1348,6 +1533,13 @@ function EmployeeManager({ employees, departments, onDataChange }) {
                           <div className="mt-3 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center space-x-2 text-indigo-600 dark:text-indigo-400 text-[9px] font-black uppercase tracking-wider">
                             <Calendar className="w-3 h-3 shrink-0" />
                             <span>Retroativo: {format(new Date(emp.retroactiveStart + 'T12:00:00'), 'dd/MM')} a {format(new Date(emp.retroactiveEnd + 'T12:00:00'), 'dd/MM')}</span>
+                          </div>
+                        )}
+
+                        {emp.autoPunchEnabled && (
+                          <div className="mt-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center space-x-2 text-blue-600 dark:text-blue-400 text-[9px] font-black uppercase tracking-wider">
+                            <MapPin className="w-3 h-3 shrink-0 text-blue-500 animate-pulse" />
+                            <span>Auto-Ponto GPS Ativo (Raio {emp.autoPunchRadius || 25}m)</span>
                           </div>
                         )}
                       </div>

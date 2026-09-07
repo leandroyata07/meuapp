@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar } from 'lucide-react'
+import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin } from 'lucide-react'
 import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
@@ -9,6 +9,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { ThemeToggle } from './ThemeToggle'
 import { toMinutes } from '../utils/shiftUtils'
 import { pushDocToFirestore } from '../firebase'
+import { subscribeAutoPunchStatus } from '../services/autoPunchService'
 
 const RECORD_TYPES = {
   check_in: { label: 'Entrada Principal', icon: LogIn, color: 'bg-emerald-500' },
@@ -66,6 +67,18 @@ export function PinEntry() {
   const [retroDayTime, setRetroDayTime] = useState('08:00')
   const [retroDayReason, setRetroDayReason] = useState('')
   const [isSubmittingRetro, setIsSubmittingRetro] = useState(false)
+
+  // Telemetria de Auto-Ponto por Geofencing (GPS)
+  const [autoPunchTelemetry, setAutoPunchTelemetry] = useState(null)
+
+  useEffect(() => {
+    const unsub = subscribeAutoPunchStatus((data) => {
+      if (data && employeeId && String(data.employeeId) === String(employeeId)) {
+        setAutoPunchTelemetry(data)
+      }
+    })
+    return () => unsub()
+  }, [employeeId])
 
   const loadEmployeeNotifications = async (empId = employeeId) => {
     if (!empId) return
@@ -766,6 +779,20 @@ export function PinEntry() {
               <div>
                 <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">{employee.name}</h2>
                 <p className="text-xs text-slate-400 dark:text-slate-400 mt-0.5 font-medium">Digite seu PIN de 4 dígitos</p>
+                {employee.autoPunchEnabled && (
+                  <div className={`mt-3 px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-wider inline-flex items-center space-x-1.5 ${
+                    autoPunchTelemetry?.isInside 
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                      : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
+                  }`}>
+                    <MapPin className="w-3 h-3 shrink-0 animate-pulse" />
+                    <span>
+                      {autoPunchTelemetry 
+                        ? `${autoPunchTelemetry.isInside ? 'Na Sala' : 'Fora'} (${autoPunchTelemetry.distance}m)`
+                        : 'Auto-Ponto por Presença Ativo'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -847,7 +874,7 @@ export function PinEntry() {
                 <h2 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight truncate">
                   Olá, {employee.name.split(' ')[0]}!
                 </h2>
-                <div className="flex items-center gap-2 mt-1">
+                <div className="flex flex-wrap items-center gap-2 mt-1">
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                     {todayRecords.length === 0 ? 'Aguardando Entrada' : 'Jornada em andamento'}
@@ -855,6 +882,16 @@ export function PinEntry() {
                   <span className="text-xs text-slate-400 font-medium truncate">
                     • {todayRecords.length} registro(s) hoje
                   </span>
+                  {employee.autoPunchEnabled && (
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shrink-0 ${
+                      autoPunchTelemetry?.isInside 
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                        : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
+                    }`}>
+                      <MapPin className="w-2.5 h-2.5 shrink-0 animate-pulse" />
+                      <span>{autoPunchTelemetry ? `${autoPunchTelemetry.isInside ? 'Na Sala' : 'Fora'} (${autoPunchTelemetry.distance}m)` : 'Auto-Ponto Ativo'}</span>
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

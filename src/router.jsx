@@ -15,11 +15,30 @@ import { AdminLogin } from './components/AdminLogin'
 import { AdminDashboard } from './components/AdminDashboard'
 import { ThemeToggle } from './components/ThemeToggle'
 import { startRealtimeSync, stopRealtimeSync } from './firebase'
+import { db } from './db'
+import { startAutoPunchWatcher, stopAutoPunchWatcher } from './services/autoPunchService'
 
 function RootLayout() {
   React.useEffect(() => {
     startRealtimeSync()
-    return () => stopRealtimeSync()
+
+    const initWatcher = async () => {
+      try {
+        const emps = await db.employees.toArray()
+        startAutoPunchWatcher(emps)
+      } catch (err) {
+        console.warn('Erro ao iniciar auto-ponto:', err)
+      }
+    }
+    initWatcher()
+
+    const timer = setInterval(initWatcher, 30000)
+
+    return () => {
+      stopRealtimeSync()
+      stopAutoPunchWatcher()
+      clearInterval(timer)
+    }
   }, [])
 
   return (

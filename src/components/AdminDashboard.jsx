@@ -3487,10 +3487,10 @@ function ApprovalsManager({ onAction }) {
           </p>
         </div>
         
-        {/* Barra de Ações e Filtros Moderna e Alinhada */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        {/* Barra de Ações e Filtros Moderna e 100% Visível (Sem Scroll) */}
+        <div className="flex flex-col xl:flex-row items-stretch xl:items-center gap-3 w-full xl:w-auto">
           {/* Filtro de Status (Pendentes vs Histórico) */}
-          <div className="inline-flex p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 shadow-sm">
+          <div className="grid grid-cols-2 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 shadow-sm w-full xl:w-auto gap-1">
             <button 
               type="button"
               onClick={() => setFilter('pending')}
@@ -3500,7 +3500,7 @@ function ApprovalsManager({ onAction }) {
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
               }`}
             >
-              <AlertCircle className="w-4 h-4 text-amber-300" />
+              <AlertCircle className="w-4 h-4 text-amber-300 shrink-0" />
               <span>Pendentes</span>
               {pendingCount > 0 && (
                 <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black leading-none ${
@@ -3519,15 +3519,15 @@ function ApprovalsManager({ onAction }) {
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
               }`}
             >
-              <History className="w-4 h-4" />
+              <History className="w-4 h-4 shrink-0" />
               <span>Histórico</span>
             </button>
           </div>
 
-          <div className="h-6 w-px bg-slate-200 dark:bg-white/10 hidden sm:block" />
+          <div className="h-6 w-px bg-slate-200 dark:bg-white/10 hidden xl:block" />
 
-          {/* Filtro de Categorias (Todos, Esquecidos, Dias Anteriores, Atestados) */}
-          <div className="inline-flex p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 shadow-sm overflow-x-auto custom-scrollbar">
+          {/* Filtro de Categorias: 2x2 no celular, 4 colunas no tablet/PC - 100% visível, sem scroll */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 shadow-sm w-full xl:w-auto gap-1.5">
             {[
               { id: 'all', label: 'Todos', icon: Layers, activeColor: 'bg-indigo-600 shadow-indigo-600/20' },
               { id: 'esquecimento', label: 'Esquecidos', icon: Clock, activeColor: 'bg-orange-600 shadow-orange-600/20' },
@@ -3541,13 +3541,13 @@ function ApprovalsManager({ onAction }) {
                   key={cat.id}
                   type="button"
                   onClick={() => setCategoryFilter(cat.id)}
-                  className={`flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 ${
+                  className={`flex items-center justify-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
                     isActive 
-                      ? `${cat.activeColor} text-white shadow-lg` 
-                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                      ? `${cat.activeColor} text-white shadow-md` 
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100/60 dark:hover:bg-white/5'
                   }`}
                 >
-                  <IconComp className="w-3.5 h-3.5" />
+                  <IconComp className="w-3.5 h-3.5 shrink-0" />
                   <span>{cat.label}</span>
                 </button>
               )

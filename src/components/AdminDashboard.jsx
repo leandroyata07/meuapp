@@ -59,7 +59,9 @@ import {
   Check,
   Zap,
   Scale,
-  Utensils
+  Utensils,
+  Layers,
+  History
 } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
 import { 
@@ -556,8 +558,60 @@ function EmployeeManager({ employees, departments, onDataChange }) {
   const [showAdd, setShowAdd] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [deptFilter, setDeptFilter] = useState('')
-  const [showDeptCrud, setShowDeptCrud] = useState(false)
+  const [showDeptModal, setShowDeptModal] = useState(false)
   const [newDeptName, setNewDeptName] = useState('')
+  const [editingDeptId, setEditingDeptId] = useState(null)
+  const [editingDeptName, setEditingDeptName] = useState('')
+  const [deletingDept, setDeletingDept] = useState(null)
+
+  const handleCreateDept = async () => {
+    const trimmed = newDeptName.trim()
+    if (!trimmed) return
+    const exists = departments.some(d => d.name.toLowerCase() === trimmed.toLowerCase())
+    if (exists) {
+      alert('Já existe um setor cadastrado com este nome.')
+      return
+    }
+    const id = await db.departments.add({ name: trimmed })
+    await pushDocToFirestore('departments', id, { id, name: trimmed })
+    setNewDeptName('')
+    setNewEmp(prev => ({ ...prev, departmentId: String(id) }))
+    onDataChange()
+  }
+
+  const handleSaveEditDept = async (deptId) => {
+    const trimmed = editingDeptName.trim()
+    if (!trimmed) return
+    const exists = departments.some(d => d.id !== deptId && d.name.toLowerCase() === trimmed.toLowerCase())
+    if (exists) {
+      alert('Já existe outro setor com este nome.')
+      return
+    }
+    await db.departments.update(deptId, { name: trimmed })
+    await pushDocToFirestore('departments', deptId, { id: deptId, name: trimmed })
+    setEditingDeptId(null)
+    setEditingDeptName('')
+    onDataChange()
+  }
+
+  const handleConfirmDeleteDept = async (dept) => {
+    if (!dept) return
+    const linkedEmployees = employees.filter(e => String(e.departmentId) === String(dept.id))
+    for (const emp of linkedEmployees) {
+      await db.employees.update(emp.id, { departmentId: '' })
+      await pushDocToFirestore('employees', emp.id, { ...emp, departmentId: '' })
+    }
+    if (String(newEmp.departmentId) === String(dept.id)) {
+      setNewEmp(prev => ({ ...prev, departmentId: '' }))
+    }
+    if (String(deptFilter) === String(dept.id)) {
+      setDeptFilter('')
+    }
+    await db.departments.delete(dept.id)
+    await deleteDocFromFirestore('departments', dept.id)
+    setDeletingDept(null)
+    onDataChange()
+  }
   const defaultEmpState = { 
     name: '', 
     pin: '', 
@@ -1080,7 +1134,18 @@ function EmployeeManager({ employees, departments, onDataChange }) {
                     <option value="">Nenhum Setor</option>
                     {departments.map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
                   </select>
-                  <button type="button" onClick={() => setShowDeptCrud(!showDeptCrud)} className="p-4 bg-blue-600/10 text-blue-500 rounded-2xl hover:bg-blue-600 hover:text-white transition-all border border-blue-500/20"><Plus className="w-5 h-5" /></button>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setDeletingDept(null)
+                      setEditingDeptId(null)
+                      setShowDeptModal(true)
+                    }} 
+                    title="Gerenciar Setores (Cadastrar, Editar, Excluir)"
+                    className="p-4 bg-blue-600/10 text-blue-500 rounded-2xl hover:bg-blue-600 hover:text-white transition-all border border-blue-500/20"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -1118,7 +1183,7 @@ function EmployeeManager({ employees, departments, onDataChange }) {
                 </div>
               </div>
               <button 
-                type="button"
+                type="button" 
                 onClick={() => setNewEmp({ ...newEmp, allowRetroactive: !newEmp.allowRetroactive })}
                 className={`w-12 h-6 rounded-full transition-all relative ${newEmp.allowRetroactive ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-800'}`}
               >
@@ -1155,41 +1220,6 @@ function EmployeeManager({ employees, departments, onDataChange }) {
             )}
           </div>
 
-          {showDeptCrud && (
-            <div className="p-8 bg-slate-50 dark:bg-black/60 rounded-[2.5rem] border border-black/5 dark:border-white/5 space-y-6 animate-in zoom-in duration-300">
-              <div className="flex justify-between items-center">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gerenciar Setores</h4>
-                <button type="button" onClick={() => setShowDeptCrud(false)}><X className="w-4 h-4 text-slate-400" /></button>
-              </div>
-              <div className="flex space-x-3">
-                <input type="text" placeholder="Nome do novo setor..." className="flex-1 bg-white dark:bg-black/40 border border-black/5 dark:border-white/5 rounded-xl p-4 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" value={newDeptName} onChange={e => setNewDeptName(e.target.value)} />
-                <button type="button" onClick={async () => { 
-                  if (!newDeptName) return; 
-                  const id = await db.departments.add({ name: newDeptName }); 
-                  await pushDocToFirestore('departments', id, { id, name: newDeptName });
-                  setNewDeptName(''); 
-                  setNewEmp({ ...newEmp, departmentId: String(id) }); 
-                  setShowDeptCrud(false); 
-                  onDataChange(); 
-                }} className="px-8 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-500 transition-colors">Adicionar</button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {departments.map(d => (
-                  <div key={d.id} className="flex items-center space-x-2 pl-4 pr-2 py-2 bg-white dark:bg-white/5 rounded-full border border-black/5 dark:border-white/5 group hover:border-red-500/30 transition-colors">
-                    <span className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase">{d.name}</span>
-                    <button type="button" onClick={async () => {
-                      if (confirm(`Excluir ${d.name}?`)) {
-                        await db.departments.delete(d.id);
-                        await deleteDocFromFirestore('departments', d.id);
-                        onDataChange();
-                      }
-                    }} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="w-3 h-3" /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           <button type="submit" className="w-full py-6 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-3xl shadow-2xl shadow-blue-600/40 transition-all active:scale-[0.98] text-lg uppercase tracking-[0.3em]">{editingId ? 'Salvar Alterações' : 'Finalizar Cadastro'}</button>
         </form>
       )}
@@ -1202,10 +1232,24 @@ function EmployeeManager({ employees, departments, onDataChange }) {
               <input type="text" placeholder="Pesquisar colaborador por nome..." className="w-full p-5 pl-14 bg-transparent text-slate-900 dark:text-white outline-none font-bold placeholder:font-normal text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
             <div className="w-px bg-black/5 dark:bg-white/5 hidden md:block my-2" />
-            <select className="md:w-72 p-5 bg-transparent text-slate-900 dark:text-white outline-none font-black text-xs uppercase tracking-widest appearance-none cursor-pointer" value={String(deptFilter)} onChange={e => setDeptFilter(e.target.value)}>
-              <option value="">Todos os Setores</option>
-              {departments.map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
-            </select>
+            <div className="flex items-center space-x-2 md:w-80">
+              <select className="flex-1 p-5 bg-transparent text-slate-900 dark:text-white outline-none font-black text-xs uppercase tracking-widest appearance-none cursor-pointer" value={String(deptFilter)} onChange={e => setDeptFilter(e.target.value)}>
+                <option value="">Todos os Setores</option>
+                {departments.map(d => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
+              </select>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setDeletingDept(null)
+                  setEditingDeptId(null)
+                  setShowDeptModal(true)
+                }} 
+                title="Gerenciar Setores (Cadastrar, Editar, Excluir)"
+                className="p-3 mr-2 bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 dark:bg-white/5 dark:hover:bg-blue-900/20 dark:text-slate-300 dark:hover:text-blue-400 rounded-2xl transition-all border border-slate-200/80 dark:border-white/10 shrink-0"
+              >
+                <Building2 className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {!searchTerm && !showAll && !deptFilter ? (
@@ -1324,6 +1368,246 @@ function EmployeeManager({ employees, departments, onDataChange }) {
                 })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Modal de Gerenciamento de Setores (Inclusão, Edição, Exclusão com aviso de quantidade e Salvamento) */}
+      {showDeptModal && (
+        <div 
+          className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => {
+            setShowDeptModal(false)
+            setEditingDeptId(null)
+            setDeletingDept(null)
+          }}
+        >
+          <div 
+            className="relative max-w-xl w-full bg-white dark:bg-[#0c1322] rounded-[2.5rem] p-7 md:p-9 border border-slate-200 dark:border-white/10 shadow-2xl space-y-6 animate-in zoom-in duration-200 max-h-[90vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Cabeçalho */}
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 dark:border-white/10">
+              <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center shadow-inner">
+                  <Building2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">Gerenciamento de Setores</h3>
+                  <p className="text-xs text-slate-400 font-medium">Cadastre, edite ou remova departamentos da empresa</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => {
+                  setShowDeptModal(false)
+                  setEditingDeptId(null)
+                  setDeletingDept(null)
+                }} 
+                className="p-2.5 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Inclusão de Novo Setor */}
+            <div className="p-4 bg-slate-50 dark:bg-black/30 rounded-2xl border border-slate-200/80 dark:border-white/5 space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">Criar Novo Setor</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Ex: Financeiro, Operacional, RH, Comercial..." 
+                  className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-xs" 
+                  value={newDeptName} 
+                  onChange={e => setNewDeptName(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      await handleCreateDept()
+                    }
+                  }}
+                />
+                <button 
+                  type="button" 
+                  onClick={handleCreateDept} 
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-blue-600/20 active:scale-95 flex items-center space-x-1.5 shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Adicionar</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Confirmação de Exclusão com Aviso de Quantidade de Funcionários */}
+            {deletingDept && (
+              <div className="p-5 bg-red-50 dark:bg-red-950/40 border-2 border-red-500/40 rounded-2xl space-y-3 animate-in zoom-in duration-200 shadow-lg shadow-red-500/10">
+                <div className="flex items-start space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-red-600/30">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-black text-red-600 dark:text-red-400">
+                      Confirmar exclusão do setor "{deletingDept.name}"?
+                    </h4>
+                    {(() => {
+                      const count = employees.filter(e => String(e.departmentId) === String(deletingDept.id)).length
+                      return count > 0 ? (
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed">
+                          ⚠️ <span className="text-red-600 dark:text-red-400 underline font-black">Atenção:</span> Existem <strong className="text-red-600 dark:text-red-400 font-black">{count} colaborador(es)</strong> vinculados a este setor. Ao excluir, o vínculo deles será desfeito e passarão para <span className="italic">"Nenhum Setor"</span>.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-slate-600 dark:text-slate-300">
+                          Nenhum colaborador está vinculado a este setor no momento.
+                        </p>
+                      )
+                    })()}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-2 border-t border-red-200 dark:border-red-500/20">
+                  <button 
+                    type="button" 
+                    onClick={() => setDeletingDept(null)}
+                    className="px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-slate-100 border border-slate-200 dark:border-white/10"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => handleConfirmDeleteDept(deletingDept)}
+                    className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md shadow-red-600/30 transition-all active:scale-95 flex items-center space-x-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Sim, Excluir Setor</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Lista de Setores */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar min-h-[160px]">
+              <div className="flex justify-between items-center px-1 pb-1">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  Setores Cadastrados ({departments.length})
+                </span>
+              </div>
+
+              {departments.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 dark:bg-white/5 rounded-2xl border border-dashed border-slate-200 dark:border-white/10">
+                  <Building2 className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-400">Nenhum setor cadastrado ainda.</p>
+                </div>
+              ) : (
+                departments.map(dept => {
+                  const count = employees.filter(e => String(e.departmentId) === String(dept.id)).length
+                  const isEditing = editingDeptId === dept.id
+
+                  return (
+                    <div 
+                      key={dept.id} 
+                      className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                        isEditing 
+                          ? 'bg-blue-50/80 dark:bg-blue-950/30 border-blue-400 dark:border-blue-500/50 shadow-sm' 
+                          : 'bg-white dark:bg-white/5 border-slate-200/80 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10'
+                      }`}
+                    >
+                      {isEditing ? (
+                        <div className="flex-1 flex items-center gap-2">
+                          <input 
+                            type="text" 
+                            className="flex-1 bg-white dark:bg-slate-900 border border-blue-400 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" 
+                            value={editingDeptName} 
+                            onChange={e => setEditingDeptName(e.target.value)}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                await handleSaveEditDept(dept.id)
+                              } else if (e.key === 'Escape') {
+                                setEditingDeptId(null)
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => handleSaveEditDept(dept.id)}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-1 shadow-sm shrink-0"
+                            title="Salvar alteração"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>Salvar</span>
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => setEditingDeptId(null)}
+                            className="p-2 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 rounded-xl transition-all shrink-0"
+                            title="Cancelar"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 font-black text-xs">
+                              <Building2 className="w-4 h-4 text-blue-500" />
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="font-black text-sm text-slate-900 dark:text-white truncate">
+                                {dept.name}
+                              </h4>
+                              <span className={`text-[10px] font-bold ${count > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}`}>
+                                👥 {count} {count === 1 ? 'colaborador' : 'colaboradores'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5 shrink-0">
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setDeletingDept(null)
+                                setEditingDeptId(dept.id)
+                                setEditingDeptName(dept.name)
+                              }}
+                              className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                              title="Editar nome do setor"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setEditingDeptId(null)
+                                setDeletingDept(dept)
+                              }}
+                              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                              title="Excluir setor"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            {/* Rodapé */}
+            <div className="pt-3 border-t border-slate-100 dark:border-white/10 flex justify-end">
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowDeptModal(false)
+                  setEditingDeptId(null)
+                  setDeletingDept(null)
+                }}
+                className="px-6 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/15 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all"
+              >
+                Concluído
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -3072,6 +3356,7 @@ function ApprovalsManager({ onAction }) {
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState('pending') // 'pending' or 'all'
   const [categoryFilter, setCategoryFilter] = useState('all') // 'all', 'esquecimento', 'retroactive_day', 'medico'
+  const [pendingCount, setPendingCount] = useState(0)
   const [selectedPhoto, setSelectedPhoto] = useState(null)
 
   const [rejectModal, setRejectModal] = useState({ show: false, record: null, reason: '' })
@@ -3085,6 +3370,10 @@ function ApprovalsManager({ onAction }) {
     try {
       setIsLoading(true)
       const allRecords = await db.records.toArray()
+      const totalPending = allRecords.filter(r => 
+        r.status === 'pending' && ['medico', 'esquecimento', 'retroactive_day'].includes(r.category)
+      ).length
+      setPendingCount(totalPending)
       
       let relevant = allRecords.filter(r => 
         ['pending', 'approved', 'rejected'].includes(r.status) &&
@@ -3187,50 +3476,82 @@ function ApprovalsManager({ onAction }) {
 
   return (
     <div className="space-y-10">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 pb-2 border-b border-black/5 dark:border-white/5">
         <div>
           <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
-            <ShieldCheck className="w-8 h-8 mr-3 text-blue-600" />
-            Central de Aprovações
+            <ShieldCheck className="w-8 h-8 mr-3 text-blue-600 shrink-0" />
+            <span>Central de Aprovações</span>
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1 text-sm">
             Valide solicitações de pontos esquecidos, inclusões de dias anteriores e atestados médicos.
           </p>
         </div>
         
-        <div className="flex flex-wrap gap-2 items-center">
-          {/* Category Filter */}
-          <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm">
-            {[
-              { id: 'all', label: 'Todos' },
-              { id: 'esquecimento', label: 'Esquecidos' },
-              { id: 'retroactive_day', label: 'Dias Anteriores' },
-              { id: 'medico', label: 'Atestados' }
-            ].map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => setCategoryFilter(cat.id)}
-                className={`px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-[0.1em] transition-all ${categoryFilter === cat.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white'}`}
-              >
-                {cat.label}
-              </button>
-            ))}
+        {/* Barra de Ações e Filtros Moderna e Alinhada */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* Filtro de Status (Pendentes vs Histórico) */}
+          <div className="inline-flex p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 shadow-sm">
+            <button 
+              type="button"
+              onClick={() => setFilter('pending')}
+              className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                filter === 'pending' 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              }`}
+            >
+              <AlertCircle className="w-4 h-4 text-amber-300" />
+              <span>Pendentes</span>
+              {pendingCount > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black leading-none ${
+                  filter === 'pending' ? 'bg-white text-blue-600' : 'bg-red-500 text-white animate-pulse'
+                }`}>
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+            <button 
+              type="button"
+              onClick={() => setFilter('all')}
+              className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                filter === 'all' 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              }`}
+            >
+              <History className="w-4 h-4" />
+              <span>Histórico</span>
+            </button>
           </div>
 
-          {/* Status Filter */}
-          <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-[2rem] border border-black/5 dark:border-white/10 shadow-sm">
-            <button 
-              onClick={() => setFilter('pending')}
-              className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'pending' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
-            >
-              Pendentes
-            </button>
-            <button 
-              onClick={() => setFilter('all')}
-              className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filter === 'all' ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-500 hover:text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
-            >
-              Histórico
-            </button>
+          <div className="h-6 w-px bg-slate-200 dark:bg-white/10 hidden sm:block" />
+
+          {/* Filtro de Categorias (Todos, Esquecidos, Dias Anteriores, Atestados) */}
+          <div className="inline-flex p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-black/5 dark:border-white/10 shadow-sm overflow-x-auto custom-scrollbar">
+            {[
+              { id: 'all', label: 'Todos', icon: Layers, activeColor: 'bg-indigo-600 shadow-indigo-600/20' },
+              { id: 'esquecimento', label: 'Esquecidos', icon: Clock, activeColor: 'bg-orange-600 shadow-orange-600/20' },
+              { id: 'retroactive_day', label: 'Dias Anteriores', icon: Calendar, activeColor: 'bg-purple-600 shadow-purple-600/20' },
+              { id: 'medico', label: 'Atestados', icon: FileText, activeColor: 'bg-emerald-600 shadow-emerald-600/20' }
+            ].map(cat => {
+              const IconComp = cat.icon
+              const isActive = categoryFilter === cat.id
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setCategoryFilter(cat.id)}
+                  className={`flex items-center justify-center space-x-2 px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 ${
+                    isActive 
+                      ? `${cat.activeColor} text-white shadow-lg` 
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  <IconComp className="w-3.5 h-3.5" />
+                  <span>{cat.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       </div>

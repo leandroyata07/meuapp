@@ -78,7 +78,8 @@ import {
   stopRealtimeSync,
   pushDocToFirestore,
   deleteDocFromFirestore,
-  syncAllLocalToFirestore
+  syncAllLocalToFirestore,
+  compressImage
 } from '../firebase'
 import { 
   BarChart, 
@@ -648,7 +649,14 @@ function EmployeeManager({ employees, departments, onDataChange }) {
     const file = e.target.files[0]
     if (file) {
       const reader = new FileReader()
-      reader.onloadend = () => setNewEmp({ ...newEmp, photo: reader.result })
+      reader.onloadend = async () => {
+        try {
+          const compressed = await compressImage(reader.result, 180, 180, 0.75)
+          setNewEmp(prev => ({ ...prev, photo: compressed }))
+        } catch (err) {
+          setNewEmp(prev => ({ ...prev, photo: reader.result }))
+        }
+      }
       reader.readAsDataURL(file)
     }
   }
@@ -2511,7 +2519,14 @@ function SettingsManager() {
                         const file = e.target.files[0]
                         if (file) {
                           const reader = new FileReader()
-                          reader.onload = (evt) => setSettings({...settings, companyLogo: evt.target.result})
+                          reader.onload = async (evt) => {
+                            try {
+                              const compressed = await compressImage(evt.target.result, 240, 240, 0.8)
+                              setSettings(prev => ({ ...prev, companyLogo: compressed }))
+                            } catch (err) {
+                              setSettings(prev => ({ ...prev, companyLogo: evt.target.result }))
+                            }
+                          }
                           reader.readAsDataURL(file)
                         }
                       }}

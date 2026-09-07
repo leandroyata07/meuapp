@@ -103,59 +103,93 @@ export async function testFirebaseConnection(customConfig = null) {
 }
 
 /**
- * Remove fotos de perfil, fotos de batidas e logos antes de gravar no Firestore
- * (Mantendo as imagens 100% no cache local do dispositivo conforme solicitado)
+ * Comprime imagens para miniaturas leves (< 10 KB) para permitir sincronização
+ * instantânea no Firestore sem estourar limites de documentos e sem sobrecarregar a rede.
  */
-export function stripMedia(obj) {
-  if (!obj || typeof obj !== 'object') return obj
-  const clean = { ...obj }
-
-  if ('photo' in clean) {
-    delete clean.photo
+export async function compressImage(dataUrl, maxWidth = 180, maxHeight = 180, quality = 0.75) {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+    return dataUrl || ''
   }
-  if ('companyLogo' in clean) {
-    delete clean.companyLogo
+  return new Promise((resolve) => {
+    try {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        try {
+          let width = img.width
+          let height = img.height
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width)
+              width = maxWidth
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height)
+              height = maxHeight
+            }
+          }
+
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            resolve(dataUrl)
+            return
+          }
+          ctx.drawImage(img, 0, 0, width, height)
+          const compressed = canvas.toDataURL('image/jpeg', quality)
+          resolve(compressed)
+        } catch (err) {
+          resolve(dataUrl)
+        }
+      }
+      img.onerror = () => resolve(dataUrl)
+      img.src = dataUrl
+    } catch (e) {
+      resolve(dataUrl)
+    }
+  })
+}
+
+/**
+ * Prepara documentos para envio ao Firestore:
+ * - Mantém fotos de funcionários e logomarcas comprimidas para sincronização entre todos os aparelhos
+ * - Remove apenas fotos pesadas de batidas de ponto (selfies em records) para poupar espaço
+ */
+export async function sanitizeDocForFirestore(collectionName, data) {
+  if (!data || typeof data !== 'object') return data
+  const clean = { ...data }
+
+  // Selfies de batidas de ponto não são enviadas para a nuvem
+  if (collectionName === 'records') {
+    if ('photo' in clean) delete clean.photo
   }
 
-  // Remove campos de imagem base64 ou undefined
+  // Fotos de perfil de funcionários são comprimidas para thumbnail leve (~8 KB)
+  if (collectionName === 'employees' && clean.photo) {
+    if (typeof clean.photo === 'string' && clean.photo.startsWith('data:image')) {
+      clean.photo = await compressImage(clean.photo, 180, 180, 0.75)
+    }
+  }
+
+  // Logomarca da empresa é comprimida (~12 KB)
+  if (collectionName === 'settings' && clean.companyLogo) {
+    if (typeof clean.companyLogo === 'string' && clean.companyLogo.startsWith('data:image')) {
+      clean.companyLogo = await compressImage(clean.companyLogo, 240, 240, 0.8)
+    }
+  }
+
+  // Remove valores undefined
   for (const key of Object.keys(clean)) {
     if (clean[key] === undefined) {
-      delete clean[key]
-    } else if (typeof clean[key] === 'string' && clean[key].startsWith('data:image')) {
       delete clean[key]
     }
   }
 
   return clean
-}
-
-/**
- * Armazena mídia (foto de perfil, foto de batida ou logo) no cache local do dispositivo
- */
-export async function cacheLocalMedia(key, dataUrl) {
-  if (!key || !dataUrl) return
-  try {
-    await db.localMedia.put({
-      id: key,
-      data: dataUrl,
-      updatedAt: new Date().toISOString()
-    })
-  } catch (err) {
-    console.warn('Erro ao salvar mídia localmente:', err)
-  }
-}
-
-/**
- * Recupera mídia do cache local do dispositivo
- */
-export async function getLocalMedia(key) {
-  if (!key) return null
-  try {
-    const item = await db.localMedia.get(key)
-    return item?.data || null
-  } catch (err) {
-    return null
-  }
 }
 
 /**
@@ -166,15 +200,7 @@ export async function pushDocToFirestore(collectionName, docId, data) {
     const instance = initFirebase()
     if (!instance || !docId) return
 
-    // Se houver foto, armazena no cache local antes de descartar para o Firebase
-    if (data.photo) {
-      await cacheLocalMedia(`${collectionName}_${docId}_photo`, data.photo)
-    }
-    if (data.companyLogo) {
-      await cacheLocalMedia('companyLogo', data.companyLogo)
-    }
-
-    const cleanData = stripMedia(data)
+    const cleanData = await sanitizeDocForFirestore(collectionName, data)
     cleanData.updatedAt = new Date().toISOString()
 
     const docRef = doc(instance.firestore, collectionName, String(docId))
@@ -231,29 +257,30 @@ export function startRealtimeSync(onSyncEvent = () => {}) {
             id: targetId
           }
 
-          // Recupera foto do cache local caso exista
-          if (colName === 'employees') {
-            const localEmp = await db.employees.get(itemToSave.id)
-            const cachedPhoto = await getLocalMedia(`employees_${itemToSave.id}_photo`)
-            itemToSave.photo = localEmp?.photo || cachedPhoto || ''
-          } else if (colName === 'records') {
+          // Para batidas de ponto, preserva a selfie local se não houver no remoto
+          if (colName === 'records') {
             const localRec = await db.records.get(itemToSave.id)
-            const cachedPhoto = await getLocalMedia(`records_${itemToSave.id}_photo`)
-            itemToSave.photo = localRec?.photo || cachedPhoto || null
+            itemToSave.photo = localRec?.photo || remoteData.photo || null
           } else if (colName === 'settings' && itemToSave.id === 'config') {
-            const localSettings = await db.settings.get('config')
-            const cachedLogo = await getLocalMedia('companyLogo')
-            itemToSave.companyLogo = localSettings?.companyLogo || cachedLogo || ''
             if (itemToSave.adminPassword === 'admin') {
               itemToSave.adminPassword = 'killer'
             }
           }
 
+          // Salva ou atualiza diretamente o item local
           await db[colName].put(itemToSave)
+
+          // Cura automática: se o Firestore não tinha a foto mas o aparelho local tem, envia a foto para a nuvem
+          if (colName === 'employees' && !remoteData.photo) {
+            const localEmp = await db.employees.get(targetId)
+            if (localEmp?.photo) {
+              pushDocToFirestore('employees', docId, localEmp)
+            }
+          }
         }
 
-        // Reconciliação de exclusões: se um item local não existe no Firestore, limpa da base local
-        // (preservando o funcionário de teste e o settings config)
+        // Reconciliação imediata de exclusões: se um item local não existe no Firestore, limpa da base local
+        // (preservando o funcionário de teste nativo)
         if (colName === 'employees') {
           const localItems = await db.employees.toArray()
           for (const localItem of localItems) {
@@ -267,6 +294,13 @@ export function startRealtimeSync(onSyncEvent = () => {}) {
           for (const localItem of localItems) {
             if (!firestoreIds.has(String(localItem.id))) {
               await db[colName].delete(localItem.id)
+            }
+          }
+        } else if (colName === 'records') {
+          const localItems = await db.records.toArray()
+          for (const localItem of localItems) {
+            if (!firestoreIds.has(String(localItem.id))) {
+              await db.records.delete(localItem.id)
             }
           }
         }

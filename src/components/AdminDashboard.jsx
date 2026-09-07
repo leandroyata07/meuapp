@@ -61,7 +61,9 @@ import {
   Scale,
   Utensils,
   Layers,
-  History
+  History,
+  TrendingUp,
+  TrendingDown
 } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
 import { 
@@ -71,6 +73,11 @@ import {
   checkEmployeeWorkDay, 
   formatWorkDaysSummary 
 } from '../utils/shiftUtils'
+import {
+  calculateEmployeeMonthBalance,
+  calculateCompanyMonthBalance,
+  formatMinutesToHours
+} from '../utils/timeBankUtils'
 import {
   getFirebaseConfig,
   saveFirebaseConfig,
@@ -418,6 +425,7 @@ function OverviewManager() {
   const [stats, setStats] = useState({ present: 0, lunch: 0, absent: 0, finished: 0, total: 0 })
   const [recentActivity, setRecentActivity] = useState([])
   const [chartData, setChartData] = useState([])
+  const [companyTimeBank, setCompanyTimeBank] = useState(null)
 
   useEffect(() => {
     loadDashboard()
@@ -471,6 +479,19 @@ function OverviewManager() {
       return { day: format(new Date(dayStart), 'dd/MM'), presencas: uniqueEmps }
     }))
     setChartData(weekStats)
+
+    // Balanço de Banco de Horas em Tempo Real da Empresa (Mês Atual até Hoje)
+    try {
+      const mStart = startOfMonth(new Date())
+      const allRecordsMonth = await db.records
+        .filter(r => new Date(r.timestamp) >= mStart)
+        .toArray()
+      const holidays = await db.holidays.toArray()
+      const tb = calculateCompanyMonthBalance(allEmps, allRecordsMonth, holidays, format(new Date(), 'yyyy-MM'))
+      setCompanyTimeBank(tb)
+    } catch (err) {
+      console.warn('Erro ao carregar banco de horas no dashboard:', err)
+    }
   }
 
   return (
@@ -550,6 +571,116 @@ function OverviewManager() {
           <p className="text-[10px] font-black text-slate-400 mt-3 uppercase tracking-tighter">Taxa de Presença: {Math.round((stats.present/stats.total)*100) || 0}%</p>
         </div>
       </div>
+
+      {/* Seção Banco de Horas & Horas Extras da Empresa */}
+      {companyTimeBank && (
+        <div className="bg-white dark:bg-slate-900 p-6 lg:p-8 rounded-[3rem] shadow-sm border border-black/5 dark:border-white/5 space-y-6 animate-in fade-in duration-500">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 flex items-center justify-center text-white shadow-md shadow-emerald-500/20 shrink-0">
+                <Scale className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  Banco de Horas & Horas Extras
+                  <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                    Tempo Real • {format(new Date(), 'MMMM yyyy', { locale: ptBR })}
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">Balanço consolidado de horas de toda a equipe no mês atual (até hoje).</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-slate-400">Saldo Geral da Empresa:</span>
+              <span className={`px-4 py-1.5 rounded-2xl text-sm font-black font-mono ${
+                companyTimeBank.companyNetBalanceMin >= 0 
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' 
+                  : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30'
+              }`}>
+                {companyTimeBank.companyNetFormatted}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-5 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Horas na Casa (Extras)</p>
+                <p className="text-2xl font-black font-mono text-emerald-700 dark:text-emerald-300 mt-0.5">+{companyTimeBank.totalOvertimeFormatted}</p>
+                <p className="text-[10px] text-emerald-600/80 font-bold mt-1">{companyTimeBank.creditCount} colaborador(es) com crédito</p>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-red-600 dark:text-red-400">Horas Devidas (Faltas/Débitos)</p>
+                <p className="text-2xl font-black font-mono text-red-700 dark:text-red-300 mt-0.5">-{companyTimeBank.totalDebtFormatted}</p>
+                <p className="text-[10px] text-red-600/80 font-bold mt-1">{companyTimeBank.debtCount} colaborador(es) devendo horas</p>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-500/20 shrink-0">
+                <TrendingDown className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-5 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Horas Trabalhadas</p>
+                <p className="text-2xl font-black font-mono text-blue-700 dark:text-blue-300 mt-0.5">{companyTimeBank.totalWorkedFormatted}</p>
+                <p className="text-[10px] text-blue-600/80 font-bold mt-1">Previsto: {companyTimeBank.totalExpectedFormatted}</p>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-blue-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0">
+                <Clock className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Lista de Colaboradores com Saldo */}
+          <div className="overflow-hidden border border-black/5 dark:border-white/5 rounded-2xl divide-y divide-black/5 dark:divide-white/5">
+            {companyTimeBank.employeeBalances.length === 0 ? (
+              <p className="p-6 text-center text-xs text-slate-400 font-medium">Nenhum colaborador registrado.</p>
+            ) : (
+              companyTimeBank.employeeBalances.map(b => (
+                <div key={b.employeeId} className="p-3.5 sm:p-4 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors gap-3">
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                      b.status === 'credit' ? 'bg-emerald-500' : b.status === 'debt' ? 'bg-red-500' : 'bg-blue-500'
+                    }`} />
+                    <div className="truncate">
+                      <h4 className="font-bold text-xs text-slate-900 dark:text-white truncate">{b.employeeName}</h4>
+                      <p className="text-[10px] text-slate-400">
+                        Trabalhado: <span className="font-mono text-slate-700 dark:text-slate-300 font-bold">{b.workedFormatted}</span> / Previsto: <span className="font-mono">{b.expectedFormatted}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-3 shrink-0">
+                    <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black font-mono uppercase ${
+                      b.status === 'credit' 
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' 
+                        : b.status === 'debt' 
+                          ? 'bg-red-500/15 text-red-600 dark:text-red-400' 
+                          : 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                    }`}>
+                      {b.status === 'credit' && `+${b.overtimeFormatted} (Na Casa)`}
+                      {b.status === 'debt' && `-${b.debtFormatted} (Devendo)`}
+                      {b.status === 'neutral' && 'Em Dia'}
+                    </span>
+                    <span className={`font-mono font-black text-xs w-16 text-right ${
+                      b.status === 'credit' ? 'text-emerald-600 dark:text-emerald-400' : b.status === 'debt' ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-300'
+                    }`}>
+                      {b.balanceFormatted}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1810,6 +1941,8 @@ function ReportsManager({ employees, departments, onDataChange }) {
   const [records, setRecords] = useState([])
   const [filter, setFilter] = useState({ employeeId: '', period: 'day', date: format(new Date(), 'yyyy-MM-dd'), month: format(new Date(), 'yyyy-MM') })
   const [calculatedHours, setCalculatedHours] = useState(null)
+  const [empTimeBank, setEmpTimeBank] = useState(null)
+  const [companyMonthSummary, setCompanyMonthSummary] = useState(null)
   const [isPrinting, setIsPrinting] = useState(false)
   const [viewingPhoto, setViewingPhoto] = useState(null)
   const [showManualEntry, setShowManualEntry] = useState(false)
@@ -1900,6 +2033,32 @@ function ReportsManager({ employees, departments, onDataChange }) {
       setCalculatedHours(calculateTotalTime(filtered))
     } else {
       setCalculatedHours(null)
+    }
+
+    // Cálculo em tempo real de Banco de Horas / Horas Extras
+    try {
+      const holidays = await db.holidays.toArray()
+      if (filter.employeeId) {
+        const selectedEmp = emps.find(e => e.id === Number(filter.employeeId))
+        if (selectedEmp) {
+          const targetMonth = filter.period === 'month' ? filter.month : format(new Date(filter.date), 'yyyy-MM')
+          const balance = calculateEmployeeMonthBalance(selectedEmp, all, holidays, targetMonth)
+          setEmpTimeBank(balance)
+        } else {
+          setEmpTimeBank(null)
+        }
+        setCompanyMonthSummary(null)
+      } else {
+        setEmpTimeBank(null)
+        if (filter.period === 'month') {
+          const compBalance = calculateCompanyMonthBalance(emps, all, holidays, filter.month)
+          setCompanyMonthSummary(compBalance)
+        } else {
+          setCompanyMonthSummary(null)
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao calcular banco de horas nos relatórios:', err)
     }
   }
 
@@ -2354,7 +2513,215 @@ function ReportsManager({ employees, departments, onDataChange }) {
         </div>
       </div>
 
-      {calculatedHours && (
+      {/* Painel Detalhado de Banco de Horas do Colaborador Selecionado */}
+      {empTimeBank && (
+        <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-[3rem] shadow-xl border border-black/5 dark:border-white/10 space-y-6 animate-in zoom-in duration-500">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center space-x-4">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0 ${
+                empTimeBank.status === 'credit'
+                  ? 'bg-emerald-600 shadow-emerald-600/30'
+                  : empTimeBank.status === 'debt'
+                    ? 'bg-red-600 shadow-red-600/30'
+                    : 'bg-blue-600 shadow-blue-600/30'
+              }`}>
+                <Scale className="w-7 h-7" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    Estado de Horas • {filter.period === 'month' ? `Mês ${filter.month}` : `Mês de ${filter.date}`}
+                  </span>
+                  {(empTimeBank.isCurrentlyWorking || calculatedHours?.isWorking) && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500 text-white animate-pulse">
+                      Ao Vivo: Trabalho em Andamento
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
+                  {empTimeBank.employeeName}
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Saldo do Banco</span>
+                <span className={`text-2xl md:text-3xl font-black font-mono ${
+                  empTimeBank.status === 'credit'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : empTimeBank.status === 'debt'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-blue-600 dark:text-blue-400'
+                }`}>
+                  {empTimeBank.balanceFormatted}
+                </span>
+              </div>
+              <div className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider ${
+                empTimeBank.status === 'credit'
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                  : empTimeBank.status === 'debt'
+                    ? 'bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30'
+                    : 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+              }`}>
+                {empTimeBank.status === 'credit' && 'Horas na Casa'}
+                {empTimeBank.status === 'debt' && 'Devendo Horas'}
+                {empTimeBank.status === 'neutral' && 'Em Dia'}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/40 border border-black/5 dark:border-white/5">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Carga Prevista CLT</span>
+              <span className="text-xl font-black text-slate-900 dark:text-white font-mono mt-1 block">{empTimeBank.expectedFormatted}</span>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Até a data atual</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+              <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider block">Total Trabalhado</span>
+              <span className="text-xl font-black text-blue-700 dark:text-blue-300 font-mono mt-1 block">{empTimeBank.workedFormatted}</span>
+              <span className="text-[10px] text-blue-500/80 mt-0.5 block">{empTimeBank.workedDaysCount} dia(s) com batida</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Horas Extras ("Na Casa")</span>
+              <span className="text-xl font-black text-emerald-700 dark:text-emerald-300 font-mono mt-1 block">+{empTimeBank.overtimeFormatted}</span>
+              <span className="text-[10px] text-emerald-600/80 mt-0.5 block">Crédito p/ compensar ou pagar</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20">
+              <span className="text-[10px] font-black text-red-600 dark:text-red-400 uppercase tracking-wider block">Horas Devidas ("Devendo")</span>
+              <span className="text-xl font-black text-red-700 dark:text-red-300 font-mono mt-1 block">-{empTimeBank.debtFormatted}</span>
+              <span className="text-[10px] text-red-600/80 mt-0.5 block">{empTimeBank.absenceDaysCount} falta(s) no período</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resumo Mensal de Fechamento de RH de Todos os Colaboradores */}
+      {companyMonthSummary && !filter.employeeId && (
+        <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-[3rem] shadow-xl border border-black/5 dark:border-white/10 space-y-6 animate-in zoom-in duration-500">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center space-x-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/20 shrink-0">
+                <Scale className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                  Fechamento Consolidado do Mês • {filter.month}
+                </h3>
+                <p className="text-xs text-slate-400 font-medium">Balanço geral de banco de horas e horas extras de todos os colaboradores.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-slate-400">Saldo Líquido da Empresa:</span>
+              <span className={`px-4 py-1.5 rounded-2xl text-base font-black font-mono ${
+                companyMonthSummary.companyNetBalanceMin >= 0
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                  : 'bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30'
+              }`}>
+                {companyMonthSummary.companyNetFormatted}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Total Extras Acumuladas</span>
+                <p className="text-2xl font-black font-mono text-emerald-700 dark:text-emerald-300">+{companyMonthSummary.totalOvertimeFormatted}</p>
+                <span className="text-[10px] text-emerald-600 font-bold">{companyMonthSummary.creditCount} colaborador(es) com crédito</span>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shrink-0">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-red-600 dark:text-red-400">Total Horas Devidas</span>
+                <p className="text-2xl font-black font-mono text-red-700 dark:text-red-300">-{companyMonthSummary.totalDebtFormatted}</p>
+                <span className="text-[10px] text-red-600 font-bold">{companyMonthSummary.debtCount} colaborador(es) devendo</span>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-red-500 text-white flex items-center justify-center shadow-md shrink-0">
+                <TrendingDown className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Horas Trabalhadas</span>
+                <p className="text-2xl font-black font-mono text-blue-700 dark:text-blue-300">{companyMonthSummary.totalWorkedFormatted}</p>
+                <span className="text-[10px] text-blue-500 font-bold">Previsto: {companyMonthSummary.totalExpectedFormatted}</span>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-blue-500 text-white flex items-center justify-center shadow-md shrink-0">
+                <Clock className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela de Fechamento Individual de Cada Funcionário */}
+          <div className="overflow-x-auto border border-black/5 dark:border-white/5 rounded-2xl">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-black/5 dark:border-white/10 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50 dark:bg-black/20">
+                  <th className="p-3.5">Colaborador</th>
+                  <th className="p-3.5 text-center">Previsto</th>
+                  <th className="p-3.5 text-center">Trabalhado</th>
+                  <th className="p-3.5 text-center">Extras ("Na Casa")</th>
+                  <th className="p-3.5 text-center">Devendo</th>
+                  <th className="p-3.5 text-right">Saldo Final</th>
+                  <th className="p-3.5 text-center">Status</th>
+                  <th className="p-3.5 text-center">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/5 dark:divide-white/5 text-xs">
+                {companyMonthSummary.employeeBalances.map(b => (
+                  <tr key={b.employeeId} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                    <td className="p-3.5 font-bold text-slate-900 dark:text-white">
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-2 h-2 rounded-full ${
+                          b.status === 'credit' ? 'bg-emerald-500' : b.status === 'debt' ? 'bg-red-500' : 'bg-blue-500'
+                        }`} />
+                        <span>{b.employeeName}</span>
+                      </div>
+                    </td>
+                    <td className="p-3.5 text-center font-mono text-slate-500">{b.expectedFormatted}</td>
+                    <td className="p-3.5 text-center font-mono font-bold text-slate-800 dark:text-slate-200">{b.workedFormatted}</td>
+                    <td className="p-3.5 text-center font-mono text-emerald-600 font-bold">+{b.overtimeFormatted}</td>
+                    <td className="p-3.5 text-center font-mono text-red-600 font-bold">-{b.debtFormatted}</td>
+                    <td className="p-3.5 text-right font-mono font-black text-sm">
+                      <span className={b.status === 'credit' ? 'text-emerald-600' : b.status === 'debt' ? 'text-red-600' : 'text-slate-600 dark:text-slate-300'}>
+                        {b.balanceFormatted}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <span className={`px-2.5 py-1 rounded-xl text-[9px] font-black uppercase ${
+                        b.status === 'credit' ? 'bg-emerald-500/15 text-emerald-600' : b.status === 'debt' ? 'bg-red-500/15 text-red-600' : 'bg-blue-500/15 text-blue-600'
+                      }`}>
+                        {b.status === 'credit' ? 'Na Casa' : b.status === 'debt' ? 'Devendo' : 'Em Dia'}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <button
+                        onClick={() => setFilter({ ...filter, employeeId: String(b.employeeId) })}
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[10px] font-bold uppercase transition-all"
+                      >
+                        Ver Detalhes
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback caso apenas calculatedHours esteja disponível (ex: modo diário sem colaborador selecionado) */}
+      {!empTimeBank && !companyMonthSummary && calculatedHours && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 rounded-[3rem] shadow-xl shadow-blue-600/20 flex flex-col md:flex-row justify-between items-center text-white gap-6 animate-in zoom-in duration-500">
           <div className="flex items-center space-x-6 text-center md:text-left">
             <div className="w-16 h-16 bg-white/20 rounded-[1.5rem] flex items-center justify-center backdrop-blur-md">

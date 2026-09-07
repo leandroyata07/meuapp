@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin } from 'lucide-react'
+import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin, Scale, TrendingUp, TrendingDown } from 'lucide-react'
 import { format, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
@@ -10,6 +10,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { toMinutes } from '../utils/shiftUtils'
 import { pushDocToFirestore } from '../firebase'
 import { subscribeAutoPunchStatus } from '../services/autoPunchService'
+import { calculateEmployeeMonthBalance } from '../utils/timeBankUtils'
 
 const RECORD_TYPES = {
   check_in: { label: 'Entrada Principal', icon: LogIn, color: 'bg-emerald-500' },
@@ -71,6 +72,9 @@ export function PinEntry() {
   // Telemetria de Auto-Ponto por Geofencing (GPS)
   const [autoPunchTelemetry, setAutoPunchTelemetry] = useState(null)
 
+  // Saldo de Banco de Horas em Tempo Real
+  const [timeBank, setTimeBank] = useState(null)
+
   useEffect(() => {
     const unsub = subscribeAutoPunchStatus((data) => {
       if (data && employeeId && String(data.employeeId) === String(employeeId)) {
@@ -95,6 +99,26 @@ export function PinEntry() {
     }
   }
 
+  const loadTimeBank = async (empId = employeeId, empObj = null) => {
+    if (!empId) return
+    try {
+      const emp = empObj || employee || await db.employees.get(Number(empId))
+      if (!emp) return
+      const now = new Date()
+      const mStart = startOfMonth(now)
+      const holidays = await db.holidays.toArray()
+      const records = await db.records
+        .where('employeeId')
+        .equals(Number(emp.id))
+        .filter(r => new Date(r.timestamp) >= mStart)
+        .toArray()
+      const balance = calculateEmployeeMonthBalance(emp, records, holidays, format(now, 'yyyy-MM'))
+      setTimeBank(balance)
+    } catch (err) {
+      console.warn('Erro ao carregar banco de horas do colaborador:', err)
+    }
+  }
+
   useEffect(() => {
     db.settings.get('config').then(setSettings)
     db.employees.get(Number(employeeId)).then(emp => {
@@ -107,6 +131,7 @@ export function PinEntry() {
         sessionStorage.removeItem('biometricVerified')
         setStep('select')
       }
+      loadTimeBank(employeeId, emp)
     })
     loadTodayRecords()
     loadEmployeeNotifications()
@@ -114,6 +139,7 @@ export function PinEntry() {
     const handleSync = () => {
       loadTodayRecords()
       loadEmployeeNotifications()
+      loadTimeBank()
     }
     window.addEventListener('pontoaqui:sync', handleSync)
     return () => {
@@ -1087,6 +1113,80 @@ export function PinEntry() {
             </div>
           )}
 
+          {/* Card de Banco de Horas em Tempo Real */}
+          {timeBank && (
+            <div className={`p-6 rounded-[2rem] border transition-all shadow-lg space-y-4 ${
+              timeBank.status === 'credit'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100 shadow-emerald-500/5'
+                : timeBank.status === 'debt'
+                  ? 'bg-red-500/10 border-red-500/30 text-red-950 dark:text-red-100 shadow-red-500/5'
+                  : 'bg-blue-500/10 border-blue-500/30 text-blue-950 dark:text-blue-100 shadow-blue-500/5'
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center space-x-3.5">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md shrink-0 ${
+                    timeBank.status === 'credit' ? 'bg-emerald-600 shadow-emerald-600/30' : timeBank.status === 'debt' ? 'bg-red-600 shadow-red-600/30' : 'bg-blue-600 shadow-blue-600/30'
+                  }`}>
+                    <Scale className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest block opacity-70">Banco de Horas • Mês Atual</span>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+                      {timeBank.status === 'credit' && (
+                        <>
+                          <TrendingUp className="w-4 h-4 text-emerald-500" />
+                          <span>Você tem Horas na Casa!</span>
+                        </>
+                      )}
+                      {timeBank.status === 'debt' && (
+                        <>
+                          <TrendingDown className="w-4 h-4 text-red-500" />
+                          <span>Você está devendo horas</span>
+                        </>
+                      )}
+                      {timeBank.status === 'neutral' && (
+                        <span>Saldo Rigorosamente em Dia</span>
+                      )}
+                    </h4>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className={`px-3.5 py-1.5 rounded-2xl text-xs font-black font-mono inline-block tracking-tight ${
+                    timeBank.status === 'credit'
+                      ? 'bg-emerald-500 text-white shadow-sm'
+                      : timeBank.status === 'debt'
+                        ? 'bg-red-500 text-white shadow-sm'
+                        : 'bg-blue-500 text-white shadow-sm'
+                  }`}>
+                    {timeBank.balanceFormatted}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-black/5 dark:border-white/10 text-center">
+                <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/30 border border-black/5 dark:border-white/5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Previsto (CLT)</span>
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-200 font-mono mt-0.5 block">{timeBank.expectedFormatted}</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/30 border border-black/5 dark:border-white/5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Trabalhado</span>
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-200 font-mono mt-0.5 block">{timeBank.workedFormatted}</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/30 border border-black/5 dark:border-white/5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                    {timeBank.status === 'credit' ? 'Horas Extras' : timeBank.status === 'debt' ? 'Devendo' : 'Saldo'}
+                  </span>
+                  <span className={`text-xs font-black font-mono mt-0.5 block ${
+                    timeBank.status === 'credit' ? 'text-emerald-600 dark:text-emerald-400' : timeBank.status === 'debt' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                  }`}>
+                    {timeBank.status === 'credit' ? `+${timeBank.overtimeFormatted}` : timeBank.status === 'debt' ? `-${timeBank.debtFormatted}` : '0h 00m'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Banner de Liberação de Dias Anteriores */}
           {employee?.allowRetroactive && employee?.retroactiveStart && employee?.retroactiveEnd && (
             <div className="p-6 bg-indigo-600/10 border border-indigo-500/30 rounded-[2rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in slide-in-from-top-3">
@@ -1536,6 +1636,33 @@ export function PinEntry() {
             <h2 className="text-2xl font-bold flex items-center justify-center"><FileText className="w-6 h-6 mr-2 text-blue-500" /> Histórico</h2>
             <p className="text-slate-500 dark:text-slate-400 text-sm">Selecione um ponto ou gere um extrato.</p>
           </div>
+
+          {timeBank && (
+            <div className={`p-5 rounded-3xl border shadow-lg space-y-3 ${
+              timeBank.status === 'credit'
+                ? 'bg-emerald-500/10 border-emerald-500/30'
+                : timeBank.status === 'debt'
+                  ? 'bg-red-500/10 border-red-500/30'
+                  : 'bg-blue-500/10 border-blue-500/30'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Banco de Horas (Mês Atual)</span>
+                <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black font-mono ${
+                  timeBank.status === 'credit'
+                    ? 'bg-emerald-500 text-white'
+                    : timeBank.status === 'debt'
+                      ? 'bg-red-500 text-white'
+                      : 'bg-blue-500 text-white'
+                }`}>
+                  {timeBank.balanceFormatted}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                <span>Trabalhadas: <b className="font-mono text-slate-900 dark:text-white">{timeBank.workedFormatted}</b></span>
+                <span>Previstas: <b className="font-mono text-slate-900 dark:text-white">{timeBank.expectedFormatted}</b></span>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-black/10 dark:border-white/10 shadow-xl space-y-4">
             <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest text-center">Gerar Extrato por Período</h3>

@@ -3476,136 +3476,135 @@ function ApprovalsManager({ onAction }) {
 
   return (
     <div className="space-y-10">
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 pb-2 border-b border-black/5 dark:border-white/5">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
-            <ShieldCheck className="w-8 h-8 mr-3 text-blue-600 shrink-0" />
-            <span>Central de Aprovações</span>
-          </h2>
-          <p className="text-slate-500 dark:text-slate-400 font-medium mt-1 text-sm">
-            Valide solicitações de pontos esquecidos, inclusões de dias anteriores e atestados médicos.
-          </p>
+      {/* Cabeçalho */}
+      <div className="pb-4 border-b border-black/5 dark:border-white/5">
+        <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center">
+          <ShieldCheck className="w-8 h-8 mr-3 text-blue-600 shrink-0" />
+          <span>Central de Aprovações</span>
+        </h2>
+        <p className="text-slate-500 dark:text-slate-400 font-medium mt-1 text-sm">
+          Valide solicitações de pontos esquecidos, inclusões de dias anteriores e atestados médicos.
+        </p>
+      </div>
+      
+      {/* Barra de Ações e Filtros Moderna (Sem cortes, sem desalinhar ícones e sem scroll) */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 w-full">
+        {/* Filtro de Status (Pendentes vs Histórico) */}
+        <div className="grid grid-cols-2 sm:flex sm:items-center p-1.5 glass-panel rounded-[2rem] border border-slate-200/80 dark:border-white/10 shadow-sm w-full sm:w-auto gap-2">
+          {[
+            {
+              id: 'pending',
+              label: 'Pendentes',
+              icon: AlertCircle,
+              badge: pendingCount,
+              activeBg: 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/30 text-white',
+              border: 'border-amber-500/30 hover:border-amber-500/70',
+              activeBorder: 'border-amber-400',
+              inactiveColor: 'text-amber-500',
+              inactiveBg: 'hover:bg-amber-500/10'
+            },
+            {
+              id: 'all',
+              label: 'Histórico',
+              icon: History,
+              activeBg: 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-600/30 text-white',
+              border: 'border-blue-500/30 hover:border-blue-500/70',
+              activeBorder: 'border-blue-400',
+              inactiveColor: 'text-blue-500',
+              inactiveBg: 'hover:bg-blue-500/10'
+            }
+          ].map(tab => {
+            const IconComp = tab.icon
+            const isActive = filter === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setFilter(tab.id)}
+                className={`flex items-center justify-center space-x-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-2xl border-2 transition-all font-bold text-[11px] sm:text-xs uppercase tracking-wider text-center active:scale-95 group whitespace-nowrap flex-1 sm:flex-initial ${
+                  isActive
+                    ? `${tab.activeBg} ${tab.activeBorder} shadow-lg`
+                    : `${tab.border} ${tab.inactiveBg} text-slate-700 dark:text-slate-300 bg-white/40 dark:bg-white/5`
+                }`}
+              >
+                <IconComp className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${isActive ? 'text-white' : tab.inactiveColor}`} />
+                <span>{tab.label}</span>
+                {tab.badge > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black leading-none ml-1.5 shrink-0 ${
+                    isActive ? 'bg-white text-amber-600' : 'bg-amber-500 text-white animate-pulse'
+                  }`}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
-        
-        {/* Barra de Ações e Filtros Moderna no mesmo padrão das Configurações (Sem Scroll) */}
-        <div className="flex flex-col xl:flex-row items-stretch xl:items-center gap-3 w-full xl:w-auto">
-          {/* Filtro de Status (Pendentes vs Histórico) */}
-          <div className="grid grid-cols-2 p-2 glass-panel rounded-[2rem] border border-slate-200/80 dark:border-white/10 shadow-sm w-full xl:w-auto gap-2">
-            {[
-              {
-                id: 'pending',
-                label: 'Pendentes',
-                icon: AlertCircle,
-                badge: pendingCount,
-                activeBg: 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/30 text-white',
-                border: 'border-amber-500/30 hover:border-amber-500/70',
-                activeBorder: 'border-amber-400',
-                inactiveColor: 'text-amber-500',
-                inactiveBg: 'hover:bg-amber-500/10'
-              },
-              {
-                id: 'all',
-                label: 'Histórico',
-                icon: History,
-                activeBg: 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-600/30 text-white',
-                border: 'border-blue-500/30 hover:border-blue-500/70',
-                activeBorder: 'border-blue-400',
-                inactiveColor: 'text-blue-500',
-                inactiveBg: 'hover:bg-blue-500/10'
-              }
-            ].map(tab => {
-              const IconComp = tab.icon
-              const isActive = filter === tab.id
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setFilter(tab.id)}
-                  className={`flex items-center justify-center space-x-2.5 px-4 py-3 rounded-2xl border-2 transition-all font-bold text-xs uppercase tracking-wider text-center active:scale-95 group whitespace-nowrap ${
-                    isActive
-                      ? `${tab.activeBg} ${tab.activeBorder} shadow-lg`
-                      : `${tab.border} ${tab.inactiveBg} text-slate-700 dark:text-slate-300 bg-white/40 dark:bg-white/5`
-                  }`}
-                >
-                  <IconComp className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${isActive ? 'text-white' : tab.inactiveColor}`} />
-                  <span>{tab.label}</span>
-                  {tab.badge > 0 && (
-                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black leading-none ml-1 ${
-                      isActive ? 'bg-white text-amber-600' : 'bg-amber-500 text-white animate-pulse'
-                    }`}>
-                      {tab.badge}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
 
-          <div className="h-8 w-px bg-slate-200 dark:bg-white/10 hidden xl:block" />
+        <div className="h-8 w-px bg-slate-200 dark:bg-white/10 hidden lg:block shrink-0" />
 
-          {/* Filtro de Categorias (Todos, Esquecidos, Dias Anteriores, Atestados) */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 p-2 glass-panel rounded-[2rem] border border-slate-200/80 dark:border-white/10 shadow-sm w-full xl:w-auto gap-2">
-            {[
-              {
-                id: 'all',
-                label: 'Todos',
-                icon: Layers,
-                activeBg: 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-600/30 text-white',
-                border: 'border-blue-500/30 hover:border-blue-500/70',
-                activeBorder: 'border-blue-400',
-                inactiveColor: 'text-blue-500',
-                inactiveBg: 'hover:bg-blue-500/10'
-              },
-              {
-                id: 'esquecimento',
-                label: 'Esquecidos',
-                icon: Clock,
-                activeBg: 'bg-gradient-to-r from-orange-500 to-amber-600 shadow-orange-500/30 text-white',
-                border: 'border-orange-500/30 hover:border-orange-500/70',
-                activeBorder: 'border-orange-400',
-                inactiveColor: 'text-orange-500',
-                inactiveBg: 'hover:bg-orange-500/10'
-              },
-              {
-                id: 'retroactive_day',
-                label: 'Dias Anteriores',
-                icon: Calendar,
-                activeBg: 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-purple-600/30 text-white',
-                border: 'border-purple-500/30 hover:border-purple-500/70',
-                activeBorder: 'border-purple-400',
-                inactiveColor: 'text-purple-500',
-                inactiveBg: 'hover:bg-purple-500/10'
-              },
-              {
-                id: 'medico',
-                label: 'Atestados',
-                icon: FileText,
-                activeBg: 'bg-gradient-to-r from-emerald-600 to-teal-600 shadow-emerald-600/30 text-white',
-                border: 'border-emerald-500/30 hover:border-emerald-500/70',
-                activeBorder: 'border-emerald-400',
-                inactiveColor: 'text-emerald-500',
-                inactiveBg: 'hover:bg-emerald-500/10'
-              }
-            ].map(cat => {
-              const IconComp = cat.icon
-              const isActive = categoryFilter === cat.id
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setCategoryFilter(cat.id)}
-                  className={`flex items-center justify-center space-x-2.5 px-4 py-3 rounded-2xl border-2 transition-all font-bold text-xs uppercase tracking-wider text-center active:scale-95 group whitespace-nowrap ${
-                    isActive
-                      ? `${cat.activeBg} ${cat.activeBorder} shadow-lg`
-                      : `${cat.border} ${cat.inactiveBg} text-slate-700 dark:text-slate-300 bg-white/40 dark:bg-white/5`
-                  }`}
-                >
-                  <IconComp className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${isActive ? 'text-white' : cat.inactiveColor}`} />
-                  <span className="truncate">{cat.label}</span>
-                </button>
-              )
-            })}
-          </div>
+        {/* Filtro de Categorias (Todos, Esquecidos, Dias Anteriores, Atestados) */}
+        <div className="grid grid-cols-2 sm:flex sm:items-center p-1.5 glass-panel rounded-[2rem] border border-slate-200/80 dark:border-white/10 shadow-sm w-full sm:w-auto gap-2">
+          {[
+            {
+              id: 'all',
+              label: 'Todos',
+              icon: Layers,
+              activeBg: 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-600/30 text-white',
+              border: 'border-blue-500/30 hover:border-blue-500/70',
+              activeBorder: 'border-blue-400',
+              inactiveColor: 'text-blue-500',
+              inactiveBg: 'hover:bg-blue-500/10'
+            },
+            {
+              id: 'esquecimento',
+              label: 'Esquecidos',
+              icon: Clock,
+              activeBg: 'bg-gradient-to-r from-orange-500 to-amber-600 shadow-orange-500/30 text-white',
+              border: 'border-orange-500/30 hover:border-orange-500/70',
+              activeBorder: 'border-orange-400',
+              inactiveColor: 'text-orange-500',
+              inactiveBg: 'hover:bg-orange-500/10'
+            },
+            {
+              id: 'retroactive_day',
+              label: 'Dias Anteriores',
+              icon: Calendar,
+              activeBg: 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-purple-600/30 text-white',
+              border: 'border-purple-500/30 hover:border-purple-500/70',
+              activeBorder: 'border-purple-400',
+              inactiveColor: 'text-purple-500',
+              inactiveBg: 'hover:bg-purple-500/10'
+            },
+            {
+              id: 'medico',
+              label: 'Atestados',
+              icon: FileText,
+              activeBg: 'bg-gradient-to-r from-emerald-600 to-teal-600 shadow-emerald-600/30 text-white',
+              border: 'border-emerald-500/30 hover:border-emerald-500/70',
+              activeBorder: 'border-emerald-400',
+              inactiveColor: 'text-emerald-500',
+              inactiveBg: 'hover:bg-emerald-500/10'
+            }
+          ].map(cat => {
+            const IconComp = cat.icon
+            const isActive = categoryFilter === cat.id
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setCategoryFilter(cat.id)}
+                className={`flex items-center justify-center space-x-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl border-2 transition-all font-bold text-[11px] sm:text-xs uppercase tracking-wider text-center active:scale-95 group whitespace-nowrap flex-1 sm:flex-initial ${
+                  isActive
+                    ? `${cat.activeBg} ${cat.activeBorder} shadow-lg`
+                    : `${cat.border} ${cat.inactiveBg} text-slate-700 dark:text-slate-300 bg-white/40 dark:bg-white/5`
+                }`}
+              >
+                <IconComp className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${isActive ? 'text-white' : cat.inactiveColor}`} />
+                <span>{cat.label}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 

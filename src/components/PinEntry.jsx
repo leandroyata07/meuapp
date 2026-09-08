@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { db } from '../db'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin, Scale, TrendingUp, TrendingDown, Sparkles, CheckSquare, Square, Layers, ListChecks, Copy } from 'lucide-react'
+import { Delete, Check, CheckCircle2, X, User, Coffee, LogOut, LogIn, Clock, AlertCircle, Info, Camera, Share2, FileText, Download, QrCode, Activity, ChevronRight, Bell, ShieldCheck, ShieldAlert, Mail, Calendar, MapPin, Scale, TrendingUp, TrendingDown, Sparkles, CheckSquare, Square, Layers, ListChecks, Copy, RotateCcw } from 'lucide-react'
 import { format, startOfMonth, eachDayOfInterval, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import html2canvas from 'html2canvas'
@@ -82,6 +82,114 @@ export function PinEntry() {
   const [retroBatchReason, setRetroBatchReason] = useState('')
   const [isSubmittingRetroBatch, setIsSubmittingRetroBatch] = useState(false)
   const [isLoadingRetroDays, setIsLoadingRetroDays] = useState(false)
+
+  // Correção Manual de Dia Excluído (quando autorizada pelo gestor)
+  const [correctionDate, setCorrectionDate] = useState('')
+  const [correctionCheckIn, setCorrectionCheckIn] = useState('08:00')
+  const [correctionHasLunch, setCorrectionHasLunch] = useState(true)
+  const [correctionLunchOut, setCorrectionLunchOut] = useState('12:00')
+  const [correctionLunchIn, setCorrectionLunchIn] = useState('13:00')
+  const [correctionCheckOut, setCorrectionCheckOut] = useState('17:48')
+  const [correctionReason, setCorrectionReason] = useState('')
+  const [isSubmittingCorrection, setIsSubmittingCorrection] = useState(false)
+
+  const handleOpenDayCorrection = (emp = employee) => {
+    if (!emp?.dayCorrectionDate) return
+    setCorrectionDate(emp.dayCorrectionDate)
+    setCorrectionCheckIn(emp.shiftStart || '08:00')
+    setCorrectionLunchOut(emp.lunchStart || '12:00')
+    setCorrectionLunchIn(emp.lunchEnd || '13:00')
+    setCorrectionCheckOut(emp.shiftEnd || '17:48')
+    setCorrectionHasLunch(Boolean(emp.lunchStart && emp.lunchEnd))
+    setCorrectionReason('')
+    setStep('day_correction')
+  }
+
+  const handleSubmitDayCorrection = async (e) => {
+    e.preventDefault()
+    if (!correctionDate) {
+      showFeedback({ type: 'warning', title: 'Data Inválida', message: 'Nenhuma data autorizada foi encontrada.' })
+      return
+    }
+    if (!correctionCheckIn || !correctionCheckOut) {
+      showFeedback({ type: 'warning', title: 'Horários Obrigatórios', message: 'Informe pelo menos os horários de Entrada e Saída.' })
+      return
+    }
+    if (correctionHasLunch && (!correctionLunchOut || !correctionLunchIn)) {
+      showFeedback({ type: 'warning', title: 'Horários do Almoço', message: 'Informe os horários de saída e retorno do almoço.' })
+      return
+    }
+
+    setIsSubmittingCorrection(true)
+    try {
+      const punchesToCreate = [
+        { type: 'check_in', time: correctionCheckIn, label: 'Entrada Principal' }
+      ]
+      if (correctionHasLunch) {
+        punchesToCreate.push(
+          { type: 'lunch_out', time: correctionLunchOut, label: 'Saída Refeição' },
+          { type: 'lunch_in', time: correctionLunchIn, label: 'Retorno Refeição' }
+        )
+      }
+      punchesToCreate.push(
+        { type: 'check_out', time: correctionCheckOut, label: 'Saída Definitiva' }
+      )
+
+      const reasonText = correctionReason.trim() || 'Ajuste manual autorizado após exclusão pela gestão'
+      const createdRecords = []
+
+      for (const punch of punchesToCreate) {
+        const recordDate = new Date(`${correctionDate}T${punch.time}:00`)
+        const rec = {
+          employeeId: Number(employeeId),
+          employeeName: employee.name,
+          employeeCpf: employee.cpf || '',
+          timestamp: recordDate.toISOString(),
+          systemTimestamp: new Date().toISOString(),
+          type: punch.type,
+          category: 'day_correction',
+          status: 'pending',
+          comment: `Correção de Dia Excluído: ${reasonText}`,
+          declaredTime: punch.time
+        }
+        const recId = await db.records.add(rec)
+        await pushDocToFirestore('records', recId, { ...rec, id: recId })
+        createdRecords.push({ ...rec, id: recId })
+      }
+
+      // Notificação ao Administrador
+      const adminNotif = {
+        target: 'admin',
+        type: 'day_correction',
+        title: 'Correção de Dia Enviada',
+        message: `${employee.name} enviou a correção manual dos pontos do dia ${format(new Date(correctionDate + 'T12:00:00'), 'dd/MM/yyyy')} (${createdRecords.length} batidas). Aguarda deferimento na Central de Aprovações.`,
+        employeeId: Number(employeeId),
+        timestamp: new Date().toISOString(),
+        read: false
+      }
+      const notifId = await db.notifications.add(adminNotif)
+      await pushDocToFirestore('notifications', notifId, { ...adminNotif, id: notifId })
+
+      showFeedback({
+        type: 'success',
+        title: 'Correção Enviada com Sucesso!',
+        message: `As ${createdRecords.length} batidas do dia ${format(new Date(correctionDate + 'T12:00:00'), 'dd/MM/yyyy')} foram enviadas para aprovação do Administrador. Assim que deferidas, a função será automaticamente encerrada.`,
+        onConfirm: () => {
+          loadTodayRecords()
+          setStep('select')
+        }
+      })
+    } catch (err) {
+      console.error('Erro ao submeter correção do dia:', err)
+      showFeedback({
+        type: 'error',
+        title: 'Erro no Envio',
+        message: 'Ocorreu um erro ao registrar as batidas da correção. Tente novamente.'
+      })
+    } finally {
+      setIsSubmittingCorrection(false)
+    }
+  }
 
   const initRetroDays = async (emp = employee) => {
     if (!emp?.retroactiveStart || !emp?.retroactiveEnd) return
@@ -1580,6 +1688,33 @@ export function PinEntry() {
             </div>
           )}
 
+          {/* Banner de Liberação de Correção de Dia Excluído */}
+          {employee?.allowDayCorrection && employee?.dayCorrectionDate && (
+            <div className="p-6 bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-amber-500/10 border border-amber-500/30 rounded-[2rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in slide-in-from-top-3 shadow-lg shadow-amber-500/5">
+              <div className="flex items-center space-x-4">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-lg shadow-amber-500/30 shrink-0">
+                  <RotateCcw className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-black text-slate-900 dark:text-white text-base">Correção de Ponto Autorizada</h4>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-500 text-white tracking-wider">Ajuste de Dia</span>
+                  </div>
+                  <p className="text-xs text-amber-800 dark:text-amber-300 font-medium mt-0.5">
+                    A administração autorizou você a lançar manualmente as batidas do dia <strong>{format(new Date(employee.dayCorrectionDate + 'T12:00:00'), 'dd/MM/yyyy')}</strong> após exclusão dos registros anteriores.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenDayCorrection()}
+                className="w-full sm:w-auto px-6 py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-500/25 active:scale-95 shrink-0"
+              >
+                Lançar Batidas do Dia
+              </button>
+            </div>
+          )}
+
           {/* Banner de Liberação de Dias Anteriores */}
           {employee?.allowRetroactive && employee?.retroactiveStart && employee?.retroactiveEnd && (
             <div className="p-6 bg-indigo-600/10 border border-indigo-500/30 rounded-[2rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in slide-in-from-top-3">
@@ -1937,6 +2072,166 @@ export function PinEntry() {
             <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
             <span>Retornando ao início automaticamente...</span>
           </div>
+        </div>
+      )}
+
+      {step === 'day_correction' && (
+        <div className="w-full max-w-3xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
+          <button 
+            type="button"
+            onClick={() => setStep('select')}
+            className="flex items-center space-x-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors text-sm font-bold"
+          >
+            <X className="w-4 h-4" />
+            <span>Cancelar e Voltar</span>
+          </button>
+
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center mx-auto mb-2 text-amber-500 border border-amber-500/30">
+              <RotateCcw className="w-8 h-8" />
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-black uppercase tracking-wider mb-1">
+              <span>Ajuste Manual Autorizado</span>
+            </div>
+            <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+              Correção de Pontos do Dia
+            </h2>
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
+              Dia liberado pela gestão: <strong className="text-amber-600 dark:text-amber-400 text-base">{correctionDate ? format(new Date(correctionDate + 'T12:00:00'), 'dd/MM/yyyy') : ''}</strong>
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmitDayCorrection} className="p-6 md:p-8 bg-white dark:bg-slate-900 rounded-3xl border border-black/10 dark:border-white/10 space-y-6 shadow-xl">
+            {/* Banner Explicativo */}
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-start space-x-3 text-xs text-amber-900 dark:text-amber-200">
+              <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold">Como funciona a correção manual de dia excluído:</p>
+                <p className="text-[11px] leading-relaxed opacity-90">
+                  Os pontos anteriores desta data foram excluídos pela administração. Preencha abaixo os horários reais em que você trabalhou neste dia. As batidas serão enviadas para a Central de Aprovações do Administrador e, assim que deferidas, a função será automaticamente concluída e bloqueada para novos lançamentos.
+                </p>
+              </div>
+            </div>
+
+            {/* Grade de Horários */}
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">
+                Horários das Batidas do Dia
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block ml-1">
+                    1. Entrada
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={correctionCheckIn}
+                    onChange={e => setCorrectionCheckIn(e.target.value)}
+                    className="w-full p-3.5 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                {correctionHasLunch ? (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest block ml-1">
+                        2. Saída Almoço
+                      </label>
+                      <input
+                        type="time"
+                        required={correctionHasLunch}
+                        value={correctionLunchOut}
+                        onChange={e => setCorrectionLunchOut(e.target.value)}
+                        className="w-full p-3.5 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest block ml-1">
+                        3. Volta Almoço
+                      </label>
+                      <input
+                        type="time"
+                        required={correctionHasLunch}
+                        value={correctionLunchIn}
+                        onChange={e => setCorrectionLunchIn(e.target.value)}
+                        className="w-full p-3.5 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest block ml-1">
+                    {correctionHasLunch ? '4. Saída Definitiva' : '2. Saída Definitiva'}
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={correctionCheckOut}
+                    onChange={e => setCorrectionCheckOut(e.target.value)}
+                    className="w-full p-3.5 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white font-black text-lg text-center outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-3 pt-2">
+                <input
+                  type="checkbox"
+                  id="correctionLunchCheck"
+                  checked={correctionHasLunch}
+                  onChange={e => setCorrectionHasLunch(e.target.checked)}
+                  className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+                <label htmlFor="correctionLunchCheck" className="text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                  Incluir intervalo de almoço / refeição (4 batidas no dia)
+                </label>
+              </div>
+            </div>
+
+            {/* Justificativa */}
+            <div className="space-y-2 pt-2 border-t border-black/5 dark:border-white/5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-1">
+                Justificativa / Observação do Colaborador
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Ex: Regularização dos horários praticados após alinhamento com a gestão..."
+                value={correctionReason}
+                onChange={e => setCorrectionReason(e.target.value)}
+                className="w-full p-4 bg-slate-50 dark:bg-black/40 border border-black/10 dark:border-white/10 rounded-2xl text-xs text-slate-900 dark:text-white font-medium outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+
+            {/* Botões */}
+            <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-black/5 dark:border-white/5">
+              <button
+                type="button"
+                onClick={() => setStep('select')}
+                className="w-full sm:w-1/3 py-4 bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 rounded-2xl font-black text-xs uppercase tracking-wider transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingCorrection}
+                className="w-full sm:flex-1 py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black rounded-2xl text-xs uppercase tracking-wider transition-all shadow-xl shadow-amber-500/25 active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2"
+              >
+                {isSubmittingCorrection ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Enviando Correção...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Enviar Correção para Aprovação</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

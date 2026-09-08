@@ -63,7 +63,8 @@ import {
   Layers,
   History,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  RotateCcw
 } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
 import { 
@@ -783,6 +784,8 @@ function EmployeeManager({ employees, departments, onDataChange }) {
     allowRetroactive: false,
     retroactiveStart: '',
     retroactiveEnd: '',
+    allowDayCorrection: false,
+    dayCorrectionDate: '',
     autoPunchEnabled: false,
     autoPunchLat: '',
     autoPunchLng: '',
@@ -871,6 +874,11 @@ function EmployeeManager({ employees, departments, onDataChange }) {
       breakMinutes: emp.breakMinutes ?? 60,
       scaleStartDate: emp.scaleStartDate || emp.startDate || format(new Date(), 'yyyy-MM-dd'),
       toleranceMin: emp.toleranceMin ?? 10,
+      allowRetroactive: !!emp.allowRetroactive,
+      retroactiveStart: emp.retroactiveStart || '',
+      retroactiveEnd: emp.retroactiveEnd || '',
+      allowDayCorrection: !!emp.allowDayCorrection,
+      dayCorrectionDate: emp.dayCorrectionDate || '',
       autoPunchEnabled: emp.autoPunchEnabled || false,
       autoPunchLat: emp.autoPunchLat != null ? emp.autoPunchLat : '',
       autoPunchLng: emp.autoPunchLng != null ? emp.autoPunchLng : '',
@@ -1385,6 +1393,89 @@ function EmployeeManager({ employees, departments, onDataChange }) {
             )}
           </div>
 
+          {/* SEÇÃO CORREÇÃO MANUAL DE DIA EXCLUÍDO (USO ÚNICO POR COLABORADOR) */}
+          <div className="p-6 bg-amber-50/50 dark:bg-amber-950/20 rounded-[2.5rem] border border-amber-500/20 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-amber-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-500/20">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Correção Manual de Dia Excluído</h4>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300">Uso Único</span>
+                  </div>
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest">
+                    Liberação exclusiva para relançar batidas de um dia após exclusão
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setNewEmp({ ...newEmp, allowDayCorrection: !newEmp.allowDayCorrection })}
+                className={`w-12 h-6 rounded-full transition-all relative ${newEmp.allowDayCorrection ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-800'}`}
+              >
+                <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${newEmp.allowDayCorrection ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+
+            {newEmp.allowDayCorrection && (
+              <div className="space-y-4 pt-2 animate-in zoom-in duration-300">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Autorizada para Correção</label>
+                    <input 
+                      type="date" 
+                      className="w-full p-4 bg-white dark:bg-black/40 border border-black/5 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white text-xs font-black outline-none focus:ring-2 focus:ring-amber-500" 
+                      value={newEmp.dayCorrectionDate || ''} 
+                      onChange={e => setNewEmp({ ...newEmp, dayCorrectionDate: e.target.value })} 
+                      required={newEmp.allowDayCorrection}
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    {editingId && newEmp.dayCorrectionDate && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(`Deseja excluir todos os registros de ponto do colaborador na data ${newEmp.dayCorrectionDate}?`)) return
+                          const dStart = new Date(newEmp.dayCorrectionDate + 'T00:00:00')
+                          const dEnd = new Date(newEmp.dayCorrectionDate + 'T23:59:59.999')
+                          const recsToDelete = await db.records
+                            .where('employeeId')
+                            .equals(Number(editingId))
+                            .filter(r => {
+                              const t = new Date(r.timestamp)
+                              return t >= dStart && t <= dEnd
+                            })
+                            .toArray()
+                          for (const r of recsToDelete) {
+                            await db.records.delete(r.id)
+                            await deleteDocFromFirestore('records', r.id)
+                          }
+                          alert(`${recsToDelete.length} batida(s) excluída(s) com sucesso na data ${newEmp.dayCorrectionDate}! A permissão de relançamento está ativa para o colaborador.`)
+                          onDataChange()
+                        }}
+                        className="px-4 py-3.5 bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all border border-rose-500/20 flex items-center justify-center space-x-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Excluir Batidas Desta Data</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-[10px] text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5 shrink-0" />
+                    <span>Regra de encerramento automático:</span>
+                  </p>
+                  <p className="leading-relaxed">
+                    O colaborador poderá lançar os pontos deste dia pelo seu terminal. Assim que você <strong>deferir (aprovar)</strong> a correção na Central de Aprovações, a função será <strong>automaticamente desativada</strong> no cadastro dele.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* SEÇÃO AUTO-PONTO POR GEOLOCALIZAÇÃO / PRESENÇA INTELIGENTE (EXCLUSIVO / PLUS) */}
           <div className="p-6 sm:p-8 bg-gradient-to-br from-blue-500/5 via-indigo-500/5 to-purple-500/5 dark:from-blue-500/10 dark:via-indigo-500/10 dark:to-purple-500/10 rounded-[2.5rem] border border-blue-500/20 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1685,6 +1776,13 @@ function EmployeeManager({ employees, departments, onDataChange }) {
                           </div>
                         )}
 
+                        {emp.allowDayCorrection && emp.dayCorrectionDate && (
+                          <div className="mt-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center space-x-2 text-amber-600 dark:text-amber-400 text-[9px] font-black uppercase tracking-wider">
+                            <RotateCcw className="w-3 h-3 shrink-0 text-amber-500" />
+                            <span>Correção de Dia Liberada: {format(new Date(emp.dayCorrectionDate + 'T12:00:00'), 'dd/MM/yyyy')}</span>
+                          </div>
+                        )}
+
                         {emp.autoPunchEnabled && (
                           <div className="mt-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center space-x-2 text-blue-600 dark:text-blue-400 text-[9px] font-black uppercase tracking-wider">
                             <MapPin className="w-3 h-3 shrink-0 text-blue-500 animate-pulse" />
@@ -1981,6 +2079,85 @@ function ReportsManager({ employees, departments, onDataChange }) {
     newTime: '',
     reason: ''
   })
+
+  const [deleteDayModal, setDeleteDayModal] = useState({
+    show: false,
+    employee: null,
+    dateStr: '',
+    dayRecords: [],
+    allowReentry: true,
+    isProcessing: false
+  })
+
+  const handleOpenDeleteDayModal = async (empId, dateStr) => {
+    const targetEmp = employees.find(e => e.id === Number(empId))
+    if (!targetEmp) return
+
+    const dStart = new Date(`${dateStr}T00:00:00`)
+    const dEnd = new Date(`${dateStr}T23:59:59.999`)
+    const allEmpRecords = await db.records.where('employeeId').equals(Number(empId)).toArray()
+    const dayRecords = allEmpRecords.filter(r => {
+      const t = new Date(r.timestamp)
+      return t >= dStart && t <= dEnd
+    }).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+
+    setDeleteDayModal({
+      show: true,
+      employee: targetEmp,
+      dateStr: dateStr,
+      dayRecords: dayRecords,
+      allowReentry: true,
+      isProcessing: false
+    })
+  }
+
+  const handleConfirmDeleteDay = async () => {
+    if (!deleteDayModal.employee || !deleteDayModal.dateStr) return
+    setDeleteDayModal(prev => ({ ...prev, isProcessing: true }))
+    try {
+      const { employee: targetEmp, dateStr, dayRecords, allowReentry } = deleteDayModal
+      
+      // 1. Exclui todos os registros do dia selecionado
+      for (const r of dayRecords) {
+        await db.records.delete(r.id)
+        await deleteDocFromFirestore('records', r.id)
+      }
+
+      // 2. Se marcada a opção, habilita a permissão no cadastro do colaborador
+      if (allowReentry) {
+        await db.employees.update(targetEmp.id, {
+          allowDayCorrection: true,
+          dayCorrectionDate: dateStr
+        })
+        const updatedEmp = await db.employees.get(targetEmp.id)
+        if (updatedEmp) {
+          await pushDocToFirestore('employees', targetEmp.id, updatedEmp)
+        }
+
+        // 3. Notifica o colaborador
+        const notif = {
+          employeeId: targetEmp.id,
+          target: 'employee',
+          type: 'day_correction_enabled',
+          title: 'Correção de Ponto Liberada',
+          message: `Os pontos do dia ${format(new Date(dateStr + 'T12:00:00'), 'dd/MM/yyyy')} foram excluídos pela administração. Você foi autorizado(a) a lançar manualmente os horários corretos pelo seu terminal.`,
+          timestamp: new Date().toISOString(),
+          read: false
+        }
+        const notifId = await db.notifications.add(notif)
+        await pushDocToFirestore('notifications', notifId, { ...notif, id: notifId })
+      }
+
+      setDeleteDayModal({ show: false, employee: null, dateStr: '', dayRecords: [], allowReentry: true, isProcessing: false })
+      await loadRecords()
+      onDataChange()
+      alert(`Pontos do dia ${format(new Date(dateStr + 'T12:00:00'), 'dd/MM/yyyy')} excluídos com sucesso! ${allowReentry ? 'O colaborador foi autorizado a relançar as batidas deste dia.' : ''}`)
+    } catch (err) {
+      console.error('Erro ao excluir pontos do dia:', err)
+      alert('Ocorreu um erro ao excluir os pontos do dia.')
+      setDeleteDayModal(prev => ({ ...prev, isProcessing: false }))
+    }
+  }
 
   useEffect(() => {
     db.settings.get('config').then(setConfig)
@@ -2453,6 +2630,17 @@ function ReportsManager({ employees, departments, onDataChange }) {
         </div>
         
         <div className="flex flex-wrap items-center gap-3 shrink-0">
+          {filter.employeeId && filter.period === 'day' && (
+            <button 
+              onClick={() => handleOpenDeleteDayModal(Number(filter.employeeId), filter.date)} 
+              className="px-5 py-3.5 bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest flex items-center space-x-2 border border-rose-500/20 shadow-sm"
+              title="Excluir todas as batidas deste dia e liberar o colaborador para relançar"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Excluir Pontos do Dia</span>
+            </button>
+          )}
+
           <button onClick={() => setShowManualEntry(!showManualEntry)} className="px-5 py-3.5 bg-blue-600/10 text-blue-600 rounded-2xl hover:bg-blue-600 hover:text-white transition-all font-black text-[10px] uppercase tracking-widest flex items-center space-x-2">
             <Plus className="w-4 h-4" />
             <span>Lançar Falta/Atestado</span>
@@ -2830,13 +3018,22 @@ function ReportsManager({ employees, departments, onDataChange }) {
                     <div className="flex flex-col md:flex-row items-center gap-2 shrink-0">
                       <span className={`px-4 py-1.5 rounded-xl text-[9px] font-black tracking-widest uppercase text-white ${config.color.split(' ')[0]}`}>{config.label}</span>
                       {r.type !== 'superseded' && r.type !== 'admin_adjustment' && r.type !== 'admin_absence' && r.type !== 'admin_excused' && (
-                        <button 
-                          onClick={() => setAdjustmentData({ record: r, newTime: format(new Date(r.timestamp), 'HH:mm'), reason: '' })}
-                          className="p-1.5 bg-slate-100 dark:bg-white/5 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all"
-                          title="Ajustar horário deste registro"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button 
+                            onClick={() => setAdjustmentData({ record: r, newTime: format(new Date(r.timestamp), 'HH:mm'), reason: '' })}
+                            className="p-1.5 bg-slate-100 dark:bg-white/5 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all"
+                            title="Ajustar horário deste registro"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            onClick={() => handleOpenDeleteDayModal(r.employeeId, format(new Date(r.timestamp), 'yyyy-MM-dd'))}
+                            className="p-1.5 bg-slate-100 dark:bg-white/5 text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
+                            title={`Excluir batidas do dia ${format(new Date(r.timestamp), 'dd/MM/yyyy')} e liberar correção`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -2885,6 +3082,120 @@ function ReportsManager({ employees, departments, onDataChange }) {
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
               <button onClick={handleAdjustSubmit} className="flex-1 py-6 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-3xl shadow-2xl shadow-orange-500/30 uppercase tracking-[0.2em] text-xs transition-all active:scale-[0.98]">Confirmar e Registrar Auditoria</button>
               <button onClick={() => setAdjustmentData({ record: null, newTime: "", reason: "" })} className="px-10 py-6 bg-slate-100 dark:bg-white/5 text-slate-500 font-black rounded-3xl uppercase tracking-[0.2em] text-xs transition-all hover:bg-slate-200 dark:hover:bg-white/10">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Customizado de Exclusão de Pontos do Dia e Liberação de Correção */}
+      {deleteDayModal.show && (
+        <div 
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-300"
+          onClick={() => !deleteDayModal.isProcessing && setDeleteDayModal({ show: false, employee: null, dateStr: '', dayRecords: [], allowReentry: true, isProcessing: false })}
+        >
+          <div 
+            className="w-full max-w-xl bg-white dark:bg-slate-900 border border-rose-500/20 rounded-[2.5rem] shadow-2xl p-7 md:p-9 space-y-6 animate-in zoom-in duration-300 relative overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-rose-500 to-amber-500" />
+            
+            <div className="flex justify-between items-start">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-600 flex items-center justify-center shrink-0 border border-rose-500/20">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                    Excluir Pontos do Dia
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                    Colaborador: <strong className="text-slate-900 dark:text-white">{deleteDayModal.employee?.name}</strong>
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => !deleteDayModal.isProcessing && setDeleteDayModal({ show: false, employee: null, dateStr: '', dayRecords: [], allowReentry: true, isProcessing: false })}
+                className="p-2 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-black/30 rounded-2xl border border-black/5 dark:border-white/5 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-bold uppercase text-[10px]">Data Selecionada:</span>
+                <span className="font-mono font-black text-slate-900 dark:text-white text-sm bg-white dark:bg-black/40 px-3 py-1 rounded-xl border border-black/5 dark:border-white/10">
+                  {deleteDayModal.dateStr ? format(new Date(deleteDayModal.dateStr + 'T12:00:00'), 'dd/MM/yyyy') : ''}
+                </span>
+              </div>
+              
+              <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
+                <span className="text-slate-400 font-bold uppercase text-[9px] block">
+                  Batidas que serão excluídas ({deleteDayModal.dayRecords.length}):
+                </span>
+                {deleteDayModal.dayRecords.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 italic">Nenhum registro encontrado nesta data.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {deleteDayModal.dayRecords.map(rec => (
+                      <span key={rec.id} className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-black/50 border border-rose-500/20 rounded-xl text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200">
+                        <Clock className="w-3 h-3 text-rose-500" />
+                        <span>{format(new Date(rec.timestamp), 'HH:mm')}</span>
+                        <span className="text-[9px] text-slate-400 uppercase font-sans">({RECORD_TYPES[rec.type]?.label || rec.type})</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Checkbox de Permissão de Relançamento */}
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
+              <label className="flex items-start space-x-3 cursor-pointer select-none">
+                <input 
+                  type="checkbox"
+                  checked={deleteDayModal.allowReentry}
+                  onChange={e => setDeleteDayModal(prev => ({ ...prev, allowReentry: e.target.checked }))}
+                  className="w-5 h-5 rounded-lg text-amber-600 focus:ring-amber-500 mt-0.5 cursor-pointer"
+                />
+                <div className="space-y-1">
+                  <span className="text-xs font-black text-amber-900 dark:text-amber-200 block">
+                    Liberar o colaborador para relançar manualmente os pontos deste dia
+                  </span>
+                  <p className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-relaxed font-medium">
+                    Ativa a permissão de uso único no cadastro do funcionário. Após ele submeter e você <strong>deferir</strong> as novas batidas na Central de Aprovações, a permissão será <strong>automaticamente desativada</strong>.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                type="button"
+                disabled={deleteDayModal.isProcessing}
+                onClick={() => setDeleteDayModal({ show: false, employee: null, dateStr: '', dayRecords: [], allowReentry: true, isProcessing: false })}
+                className="sm:w-1/3 py-4 bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-black uppercase tracking-wider hover:bg-slate-200 dark:hover:bg-white/10 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleteDayModal.isProcessing}
+                onClick={handleConfirmDeleteDay}
+                className="sm:flex-1 py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-600/30 active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2"
+              >
+                {deleteDayModal.isProcessing ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Processando Exclusão...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirmar Exclusão do Dia</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -4146,13 +4457,13 @@ function ApprovalsManager({ onAction }) {
       setIsLoading(true)
       const allRecords = await db.records.toArray()
       const totalPending = allRecords.filter(r => 
-        r.status === 'pending' && ['medico', 'esquecimento', 'retroactive_day'].includes(r.category)
+        r.status === 'pending' && ['medico', 'esquecimento', 'retroactive_day', 'day_correction'].includes(r.category)
       ).length
       setPendingCount(totalPending)
       
       let relevant = allRecords.filter(r => 
         ['pending', 'approved', 'rejected'].includes(r.status) &&
-        ['medico', 'esquecimento', 'retroactive_day'].includes(r.category)
+        ['medico', 'esquecimento', 'retroactive_day', 'day_correction'].includes(r.category)
       )
 
       if (filter === 'pending') {
@@ -4195,15 +4506,43 @@ function ApprovalsManager({ onAction }) {
         })
       }
 
+      // Se for correção manual de dia excluído: verificar se ainda há outros registros pendentes desta mesma correção.
+      // Se este for o último ou único, desativa automaticamente no perfil do funcionário!
+      if (record.category === 'day_correction') {
+        try {
+          const remainingPending = await db.records
+            .where('employeeId')
+            .equals(record.employeeId)
+            .filter(r => r.category === 'day_correction' && r.status === 'pending' && r.id !== record.id)
+            .count()
+
+          if (remainingPending === 0) {
+            await db.employees.update(record.employeeId, {
+              allowDayCorrection: false,
+              dayCorrectionDate: ''
+            })
+            const emp = await db.employees.get(record.employeeId)
+            if (emp) {
+              await pushDocToFirestore('employees', record.employeeId, emp)
+            }
+          }
+        } catch (err) {
+          console.warn('Erro ao atualizar permissão do funcionário pós-deferimento:', err)
+        }
+      }
+
       // Notifica o funcionário sobre a aprovação
       try {
+        const isDayCorrection = record.category === 'day_correction'
         const notif = {
           employeeId: record.employeeId,
           target: 'employee',
           recordId: record.id,
           type: 'request_approved',
-          title: 'Solicitação Deferida (Aprovada)',
-          message: `Sua solicitação de ponto para ${format(new Date(record.timestamp), "dd/MM/yyyy 'às' HH:mm")} foi DEFERIDA e integrada ao seu espelho de ponto.`,
+          title: isDayCorrection ? 'Correção de Dia Deferida' : 'Solicitação Deferida (Aprovada)',
+          message: isDayCorrection
+            ? `Sua correção manual de ponto para ${format(new Date(record.timestamp), "dd/MM/yyyy 'às' HH:mm")} foi DEFERIDA pela administração e integrada ao seu espelho de ponto.`
+            : `Sua solicitação de ponto para ${format(new Date(record.timestamp), "dd/MM/yyyy 'às' HH:mm")} foi DEFERIDA e integrada ao seu espelho de ponto.`,
           timestamp: new Date().toISOString(),
           read: false
         }
@@ -4352,6 +4691,16 @@ function ApprovalsManager({ onAction }) {
               inactiveBg: 'hover:bg-purple-500/10'
             },
             {
+              id: 'day_correction',
+              label: 'Correções',
+              icon: RotateCcw,
+              activeBg: 'bg-gradient-to-r from-amber-500 to-orange-600 shadow-amber-500/30 text-white',
+              border: 'border-amber-500/30 hover:border-amber-500/70',
+              activeBorder: 'border-amber-400',
+              inactiveColor: 'text-amber-500',
+              inactiveBg: 'hover:bg-amber-500/10'
+            },
+            {
               id: 'medico',
               label: 'Atestados',
               icon: FileText,
@@ -4404,10 +4753,12 @@ function ApprovalsManager({ onAction }) {
                   <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${
                     p.category === 'esquecimento' ? 'bg-orange-500/10 text-orange-500' :
                     p.category === 'retroactive_day' ? 'bg-indigo-500/10 text-indigo-500' :
+                    p.category === 'day_correction' ? 'bg-amber-500/10 text-amber-500' :
                     'bg-purple-500/10 text-purple-500'
                   }`}>
                     {p.category === 'esquecimento' ? <Clock className="w-7 h-7" /> :
                      p.category === 'retroactive_day' ? <Calendar className="w-7 h-7" /> :
+                     p.category === 'day_correction' ? <RotateCcw className="w-7 h-7" /> :
                      <Activity className="w-7 h-7" />}
                   </div>
                   <div>
@@ -4415,10 +4766,12 @@ function ApprovalsManager({ onAction }) {
                     <span className={`inline-block mt-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
                       p.category === 'esquecimento' ? 'bg-orange-500/10 text-orange-600' :
                       p.category === 'retroactive_day' ? 'bg-indigo-500/10 text-indigo-600' :
+                      p.category === 'day_correction' ? 'bg-amber-500/10 text-amber-600' :
                       'bg-purple-500/10 text-purple-600'
                     }`}>
                       {p.category === 'esquecimento' ? 'Esquecimento de Ponto' :
                        p.category === 'retroactive_day' ? 'Ponto de Dia Anterior' :
+                       p.category === 'day_correction' ? 'Correção de Dia Excluído' :
                        'Atestado Médico'}
                     </span>
                   </div>
@@ -4474,6 +4827,31 @@ function ApprovalsManager({ onAction }) {
                   {p.systemTimestamp && (
                     <p className="text-[9px] text-slate-400 font-mono">
                       Solicitado em: {format(new Date(p.systemTimestamp), "dd/MM/yyyy 'às' HH:mm")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Specific Content for Day Correction */}
+              {p.category === 'day_correction' && (
+                <div className="p-4 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-500/20 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">Data e Horário Declarado</span>
+                      <span className="text-lg font-black text-amber-600 dark:text-amber-400 font-mono">
+                        {format(new Date(p.timestamp), 'dd/MM/yyyy')} às {format(new Date(p.timestamp), 'HH:mm')}
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-white dark:bg-black/40 rounded-lg text-slate-700 dark:text-slate-300 border border-black/5 dark:border-white/10">
+                      {RECORD_TYPES[p.type]?.label || p.type}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-amber-700 dark:text-amber-300 font-medium">
+                    Lançamento manual autorizado após exclusão de batidas pelo Administrador.
+                  </p>
+                  {p.systemTimestamp && (
+                    <p className="text-[9px] text-slate-400 font-mono">
+                      Submetido em: {format(new Date(p.systemTimestamp), "dd/MM/yyyy 'às' HH:mm")}
                     </p>
                   )}
                 </div>
@@ -4675,6 +5053,18 @@ function ApprovalsManager({ onAction }) {
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
               Deseja aprovar este registro de ponto e integrá-lo oficialmente à folha do colaborador? O colaborador será notificado sobre o deferimento.
             </p>
+
+            {approveModal.record?.category === 'day_correction' && (
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-500/20 rounded-2xl text-[11px] text-amber-800 dark:text-amber-200 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                  <span>Desativação Automática da Permissão:</span>
+                </p>
+                <p className="text-[10px] leading-relaxed text-amber-700 dark:text-amber-300">
+                  Ao deferir este registro, a permissão de correção manual de dia será <strong>automaticamente desativada</strong> no perfil do colaborador, encerrando o ajuste até outra liberação futura.
+                </p>
+              </div>
+            )}
 
             <div className="flex gap-3 pt-2">
               <button

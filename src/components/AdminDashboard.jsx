@@ -71,7 +71,8 @@ import {
   DAYS_OF_WEEK, 
   calculateNetShiftTime, 
   checkEmployeeWorkDay, 
-  formatWorkDaysSummary 
+  formatWorkDaysSummary,
+  isNationalOrCustomHoliday
 } from '../utils/shiftUtils'
 import {
   calculateEmployeeMonthBalance,
@@ -423,7 +424,7 @@ export function AdminDashboard() {
 }
 
 function OverviewManager() {
-  const [stats, setStats] = useState({ present: 0, lunch: 0, absent: 0, finished: 0, total: 0 })
+  const [stats, setStats] = useState({ present: 0, lunch: 0, absent: 0, finished: 0, dayOff: 0, total: 0 })
   const [recentActivity, setRecentActivity] = useState([])
   const [chartData, setChartData] = useState([])
   const [companyTimeBank, setCompanyTimeBank] = useState(null)
@@ -447,11 +448,22 @@ function OverviewManager() {
       })
       .toArray()
 
-    let present = 0, lunch = 0, finished = 0, absent = 0
+    const dbHolidays = await db.holidays.toArray()
+    const todayHoliday = isNationalOrCustomHoliday(todayStr, dbHolidays)
+
+    let present = 0, lunch = 0, finished = 0, absent = 0, dayOff = 0
     allEmps.forEach(emp => {
       const empRecords = allRecordsToday.filter(r => r.employeeId === emp.id).sort((a,b) => b.timestamp - a.timestamp)
-      if (empRecords.length === 0) absent++
-      else {
+      if (empRecords.length === 0) {
+        // Verifica se hoje é dia de trabalho previsto para este colaborador conforme escala e feriados
+        const dayWork = checkEmployeeWorkDay(emp, new Date())
+        const isScheduledWorkDay = dayWork.isWorkDay && !todayHoliday
+        if (isScheduledWorkDay) {
+          absent++
+        } else {
+          dayOff++
+        }
+      } else {
         const last = empRecords[0].type
         if (['check_in', 'lunch_in', 'other_in'].includes(last)) present++
         else if (['lunch_out', 'other_out'].includes(last)) lunch++
@@ -459,7 +471,7 @@ function OverviewManager() {
       }
     })
 
-    setStats({ present, lunch, absent, finished, total: allEmps.length })
+    setStats({ present, lunch, absent, finished, dayOff, total: allEmps.length })
     
     // Recent activity
     const recent = allRecordsToday.sort((a,b) => b.timestamp - a.timestamp).slice(0, 5)
@@ -511,12 +523,13 @@ function OverviewManager() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 lg:gap-5">
         {[
           { label: 'Presentes', value: stats.present, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10 border-emerald-500/20', glow: 'shadow-emerald-500/10' },
           { label: 'Em Pausa', value: stats.lunch, icon: Coffee, color: 'text-orange-500', bg: 'bg-orange-500/10 border-orange-500/20', glow: 'shadow-orange-500/10' },
           { label: 'Finalizado', value: stats.finished, icon: CheckCircle2, color: 'text-blue-500', bg: 'bg-blue-500/10 border-blue-500/20', glow: 'shadow-blue-500/10' },
-          { label: 'Ausentes', value: stats.absent, icon: UserX, color: 'text-red-500', bg: 'bg-red-500/10 border-red-500/20', glow: 'shadow-red-500/10' }
+          { label: 'Ausentes', value: stats.absent, icon: UserX, color: 'text-red-500', bg: 'bg-red-500/10 border-red-500/20', glow: 'shadow-red-500/10' },
+          { label: 'Folga / Feriado', value: stats.dayOff, icon: Calendar, color: 'text-purple-500', bg: 'bg-purple-500/10 border-purple-500/20', glow: 'shadow-purple-500/10' }
         ].map((item, i) => (
           <div key={i} className={`glass-card p-5 lg:p-6 rounded-3xl border shadow-sm hover:shadow-lg transition-all duration-300 group`}>
             <div className={`w-12 h-12 ${item.bg} border rounded-2xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform`}>
@@ -567,9 +580,13 @@ function OverviewManager() {
           <p className="text-5xl font-black text-blue-600 mt-4 tracking-tighter">{stats.total}</p>
           <p className="text-xs font-bold text-slate-500 mt-2 uppercase tracking-widest">Funcionários Ativos</p>
           <div className="mt-8 w-full h-2 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-600 rounded-full transition-all duration-1000" style={{ width: `${(stats.present/stats.total)*100 || 0}%` }} />
+            <div className="h-full bg-blue-600 rounded-full transition-all duration-1000" style={{ width: `${stats.total - stats.dayOff > 0 ? (stats.present / (stats.total - stats.dayOff)) * 100 : 100}%` }} />
           </div>
-          <p className="text-[10px] font-black text-slate-400 mt-3 uppercase tracking-tighter">Taxa de Presença: {Math.round((stats.present/stats.total)*100) || 0}%</p>
+          <p className="text-[10px] font-black text-slate-400 mt-3 uppercase tracking-tighter">
+            {stats.total - stats.dayOff > 0 
+              ? `Taxa de Presença: ${Math.round((stats.present / (stats.total - stats.dayOff)) * 100)}%` 
+              : 'Dia de Descanso / Feriado (Sem expediente previsto)'}
+          </p>
         </div>
       </div>
 
@@ -1971,6 +1988,16 @@ function ReportsManager({ employees, departments, onDataChange }) {
     loadRecords()
   }, [filter])
 
+  const getDepartmentName = (targetEmp) => {
+    if (!targetEmp) return 'N/A'
+    const deptId = targetEmp.departmentId || targetEmp.department
+    if (!deptId) return 'N/A'
+    const found = departments?.find(d => String(d.id) === String(deptId) || String(d.name).toLowerCase() === String(deptId).toLowerCase())
+    if (found) return found.name
+    if (typeof deptId === 'string' && isNaN(Number(deptId))) return deptId
+    return 'N/A'
+  }
+
   const calculateTotalTime = (empRecords) => {
     const sorted = [...empRecords].filter(r => r.status !== 'rejected').sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
     let totalMs = 0
@@ -2098,7 +2125,7 @@ function ReportsManager({ employees, departments, onDataChange }) {
       doc.setTextColor(30, 41, 59)
       doc.text(`COLABORADOR: ${emp?.name?.toUpperCase() || 'N/A'}`, 14, 40)
       doc.text(`CPF: ${emp?.cpf || 'N/A'}`, 14, 45)
-      doc.text(`SETOR: ${departments.find(d => d.id === emp?.departmentId)?.name?.toUpperCase() || 'N/A'}`, 100, 45)
+      doc.text(`SETOR: ${getDepartmentName(emp).toUpperCase()}`, 100, 45)
       doc.text(`PERÍODO: ${periodLabel}`, 200, 45)
 
       // Group records by day and calculate balances
@@ -2539,9 +2566,16 @@ function ReportsManager({ employees, departments, onDataChange }) {
                     </span>
                   )}
                 </div>
-                <h3 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                  {empTimeBank.employeeName}
-                </h3>
+                <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                    {empTimeBank.employeeName}
+                  </h3>
+                  {getDepartmentName(employees.find(e => e.id === empTimeBank.employeeId)) !== 'N/A' && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-black/5 dark:border-white/5">
+                      Setor: {getDepartmentName(employees.find(e => e.id === empTimeBank.employeeId))}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -2669,6 +2703,7 @@ function ReportsManager({ employees, departments, onDataChange }) {
               <thead>
                 <tr className="border-b border-black/5 dark:border-white/10 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50 dark:bg-black/20">
                   <th className="p-3.5">Colaborador</th>
+                  <th className="p-3.5">Setor</th>
                   <th className="p-3.5 text-center">Previsto</th>
                   <th className="p-3.5 text-center">Trabalhado</th>
                   <th className="p-3.5 text-center">Extras ("Na Casa")</th>
@@ -2688,6 +2723,11 @@ function ReportsManager({ employees, departments, onDataChange }) {
                         }`} />
                         <span>{b.employeeName}</span>
                       </div>
+                    </td>
+                    <td className="p-3.5 text-xs text-slate-500">
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-white/5 text-[10px] font-black uppercase text-slate-600 dark:text-slate-300">
+                        {getDepartmentName(employees.find(e => e.id === b.employeeId))}
+                      </span>
                     </td>
                     <td className="p-3.5 text-center font-mono text-slate-500">{b.expectedFormatted}</td>
                     <td className="p-3.5 text-center font-mono font-bold text-slate-800 dark:text-slate-200">{b.workedFormatted}</td>
@@ -2880,7 +2920,7 @@ function ReportsManager({ employees, departments, onDataChange }) {
           <p>CPF: {employees.find(e => e.id === Number(filter.employeeId))?.cpf || 'N/A'}</p>
         </div>
         <div className="text-right">
-          <p>Setor: {departments.find(d => d.id === employees.find(e => e.id === Number(filter.employeeId))?.departmentId)?.name || 'N/A'}</p>
+          <p>Setor: {getDepartmentName(employees.find(e => e.id === Number(filter.employeeId)))}</p>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import { format, startOfMonth, endOfMonth, isBefore, isSameDay } from 'date-fns'
-import { calculateNetShiftTime, checkEmployeeWorkDay } from './shiftUtils'
+import { calculateNetShiftTime, checkEmployeeWorkDay, isNationalOrCustomHoliday } from './shiftUtils'
 
 /**
  * Formata minutos em texto amigável (ex: "8h 30m" ou "+2h 15m")
@@ -120,7 +120,7 @@ export function calculateEmployeeMonthBalance(emp, allRecords = [], holidays = [
       continue
     }
 
-    const holiday = holidays.find(h => h.date === dateISO)
+    const holiday = isNationalOrCustomHoliday(dateISO, holidays)
     const workDayStatus = checkEmployeeWorkDay(emp, d)
     const isScheduledWorkDay = workDayStatus.isWorkDay && !holiday
     const isSunday = d.getDay() === 0

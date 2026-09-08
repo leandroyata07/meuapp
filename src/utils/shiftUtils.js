@@ -300,3 +300,42 @@ export function formatWorkDaysSummary(emp) {
   const labels = DAYS_OF_WEEK.filter(d => days.includes(d.id)).map(d => d.label)
   return labels.join(', ') || 'Nenhum dia configurado'
 }
+
+/**
+ * Feriados nacionais oficiais e estatutários do Brasil (fixos)
+ */
+export const BRAZILIAN_FIXED_HOLIDAYS = [
+  { mmdd: '01-01', name: 'Confraternização Universal' },
+  { mmdd: '04-21', name: 'Tiradentes' },
+  { mmdd: '05-01', name: 'Dia do Trabalho' },
+  { mmdd: '09-07', name: 'Independência do Brasil' },
+  { mmdd: '10-12', name: 'Nossa Senhora Aparecida' },
+  { mmdd: '11-02', name: 'Finados' },
+  { mmdd: '11-15', name: 'Proclamação da República' },
+  { mmdd: '11-20', name: 'Dia da Consciência Negra' },
+  { mmdd: '12-25', name: 'Natal' }
+]
+
+/**
+ * Verifica se uma data específica é feriado (nacional estatutário ou cadastrado no banco)
+ * @param {string} dateStr Formato yyyy-MM-dd
+ * @param {Array} customHolidays Feriados salvos no banco local/Firestore
+ * @returns {object|null} Informações do feriado ou null se for dia comum
+ */
+export function isNationalOrCustomHoliday(dateStr, customHolidays = []) {
+  if (!dateStr) return null
+
+  // 1. Verifica feriados salvos no banco de dados
+  const fromDb = customHolidays.find(h => h.date === dateStr)
+  if (fromDb) return fromDb
+
+  // 2. Verifica feriados nacionais fixos do Brasil
+  const mmdd = dateStr.slice(5) // ex: '09-07'
+  const fixed = BRAZILIAN_FIXED_HOLIDAYS.find(h => h.mmdd === mmdd)
+  if (fixed) {
+    return { date: dateStr, name: fixed.name, type: 'national' }
+  }
+
+  return null
+}
+
